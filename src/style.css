@@ -1283,3 +1283,77 @@ dialog.modal-sheet[open]:where(:not([data-closing])) {
     }
   }
 }
+
+/* ─── Length Tier Pill, Ending Breakdown & Modal Chapter Switcher ─── */
+.length-pill {
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 99px;
+  background-color: var(--bg-subtle);
+  color: var(--ink-secondary);
+}
+
+.length-pill.is-long {
+  background-color: var(--accent-soft);
+  color: var(--accent);
+}
+
+.modal-chapter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--border);
+  background-color: var(--bg-subtle);
+}
+
+.wp-ending-box {
+  margin: 0 0 12px;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-subtle);
+  border-left: 2px solid var(--accent);
+}
+
+.wp-ending-badge {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 3px;
+}
+
+.wp-ending-desc {
+  font-size: 0.78rem;
+  line-height: 1.42;
+  color: var(--ink-secondary);
+}
+
+.endings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-top: 8px;
+}
+
+.endings-table th,
+.endings-table td {
+  text-align: left;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.endings-table th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+}
+
+.ending-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}

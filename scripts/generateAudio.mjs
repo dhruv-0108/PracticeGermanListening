@@ -1,33 +1,74 @@
 import fs from "node:fs";
 import path from "node:path";
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
-import { VOICES, KAP1_CONVERSATIONS, MIXER_CONVERSATIONS } from "./a1Kap1Scripts.mjs";
+const VOICES = {
+  seraphina: { id: "de-DE-SeraphinaMultilingualNeural", label: "Female · DE" },
+  florian: { id: "de-DE-FlorianMultilingualNeural", label: "Male · DE" },
+  katja: { id: "de-DE-KatjaNeural", label: "Female · DE" },
+  conrad: { id: "de-DE-ConradNeural", label: "Male · DE" },
+  amala: { id: "de-DE-AmalaNeural", label: "Female · DE" },
+  killian: { id: "de-DE-KillianNeural", label: "Male · DE" },
+  ingrid: { id: "de-AT-IngridNeural", label: "Female · AT" },
+  jonas: { id: "de-AT-JonasNeural", label: "Male · AT" },
+  leni: { id: "de-CH-LeniNeural", label: "Female · CH" },
+  jan: { id: "de-CH-JanNeural", label: "Male · CH" }
+};
+import { KAP1_EXTENDED_CONVERSATIONS } from "./kap1ExtendedScripts.mjs";
+import { KAP2_EXTENDED_CONVERSATIONS } from "./kap2ExtendedScripts.mjs";
+import {
+  KAP3_EXTENDED_CONVERSATIONS,
+  EXTENDED_MIXER_CONVERSATIONS
+} from "./kap3AndMixerScripts.mjs";
 import { NETZWERK_A1_CHAPTER_VOCAB } from "../src/data/netzwerkChapterVocab.js";
+import { SPOKEN_EXPRESSIONS } from "../src/data/germanEndings.js";
 
 const AUDIO_DIR = path.resolve("public/audio");
 const OUT_JSON = path.resolve("src/data/conversations/generatedConversations.json");
 fs.mkdirSync(AUDIO_DIR, { recursive: true });
 fs.mkdirSync(path.dirname(OUT_JSON), { recursive: true });
 
-function cleanVocabGerman(raw) {
-  let g = raw.trim();
-  if (g.startsWith("sie (")) return "sie";
-  if (g === "einbisschen") return "ein bisschen";
-  return g;
+function cleanVocabItem(rawGerman, rawEnglish) {
+  let g = (rawGerman || "").trim();
+  let en = (rawEnglish || "").trim();
+  if (!g || g.startsWith(",")) return null;
+  if (g.startsWith("sie (")) g = "sie";
+  if (g === "einbisschen") g = "ein bisschen";
+  if (g === "Sportun") {
+    g = "Sportart";
+    en = "type of sport";
+  }
+  if (en === "unasnu") en = "museum";
+  if (en === "siow") en = "slow";
+  if (en === "to great") en = "to greet";
+  return { german: g, english: en };
 }
 
-// Build fast lookup dictionary per chapter
-function buildChapterLookup(chapterIds) {
+function getCumulativeChapterOrder(convChapters, isMix) {
+  if (isMix) {
+    // Prioritize explicitly combined chapters, then kap-1 glue last
+    const ordered = [...convChapters].reverse();
+    if (!ordered.includes("kap-1")) ordered.push("kap-1");
+    return ordered;
+  }
+  const primary = convChapters[0];
+  if (primary === "kap-3") return ["kap-3", "kap-2", "kap-1"];
+  if (primary === "kap-2") return ["kap-2", "kap-1"];
+  return ["kap-1"];
+}
+
+function buildChapterLookup(chapterIds, isMix) {
+  const orderedChapters = getCumulativeChapterOrder(chapterIds, isMix);
   const entries = [];
   const seen = new Set();
 
-  for (const chId of chapterIds) {
+  for (const chId of orderedChapters) {
     const chData = NETZWERK_A1_CHAPTER_VOCAB[chId];
     if (!chData) continue;
     for (const [category, arr] of Object.entries(chData)) {
       for (const item of arr) {
-        const displayGerman = cleanVocabGerman(item.german);
-        const dedupKey = `${category}:${displayGerman.toLowerCase()}`;
+        const cleaned = cleanVocabItem(item.german, item.english);
+        if (!cleaned) continue;
+        const dedupKey = `${category}:${cleaned.german.toLowerCase()}`;
         if (seen.has(dedupKey)) continue;
         seen.add(dedupKey);
 
@@ -35,10 +76,10 @@ function buildChapterLookup(chapterIds) {
           key: `${chId}:${dedupKey}`,
           chapter: chId,
           category,
-          german: displayGerman,
-          article: item.article || null,
+          german: cleaned.german,
+          article: item.article && item.article !== "—" ? item.article : null,
           plural: item.plural || null,
-          english: item.english || "",
+          english: cleaned.english,
           subType: item.subType || null,
           prefix: item.prefix || null,
           baseVerb: item.baseVerb || null,
@@ -48,15 +89,49 @@ function buildChapterLookup(chapterIds) {
       }
     }
   }
+
+  // Append Spoken Closings & Fillers so natural expressions match cleanly
+  for (const exp of SPOKEN_EXPRESSIONS) {
+    const gLower = exp.german.toLowerCase();
+    const dedupKey = `closings:${gLower}`;
+    if (seen.has(dedupKey)) continue;
+    seen.add(dedupKey);
+    entries.push({
+      key: `spoken:${dedupKey}`,
+      chapter: "spoken",
+      category: "closings",
+      german: exp.german,
+      article: null,
+      plural: null,
+      english: exp.english,
+      subType: exp.type,
+      prefix: null,
+      baseVerb: null,
+      exampleA1: exp.usage,
+      exampleEn: ""
+    });
+  }
+
   return entries;
 }
 
-// Match an individual token (and full line context for separable verbs / phrases) to best vocab entry
 function matchTokenToVocab(rawToken, lineDeLower, entries) {
-  const clean = rawToken.replace(/^[^a-zA-ZäöüÄÖÜß0-9-]+|[^a-zA-ZäöüÄÖÜß0-9-]+$/g, "");
+  const clean = rawToken.replace(/^[^a-zA-ZäöüÄÖÜß0-9'-]+|[^a-zA-ZäöüÄÖÜß0-9'-]+$/g, "");
   if (!clean) return null;
   const lower = clean.toLowerCase();
   const isCapitalized = clean[0] === clean[0].toUpperCase() && clean[0] !== clean[0].toLowerCase();
+
+  // Check multi-word spoken expressions first if this token is a key content word in one
+  for (const e of entries) {
+    if (e.category === "closings") {
+      const gLower = e.german.toLowerCase();
+      if (gLower === lower) return e;
+      if (gLower.includes(" ") && lineDeLower.includes(gLower)) {
+        const parts = gLower.split(/\s+/);
+        if (parts.includes(lower) && lower.length > 3) return e;
+      }
+    }
+  }
 
   // 1. Exact match (prefer nouns if capitalized)
   const exactCandidates = entries.filter(e => {
@@ -64,7 +139,7 @@ function matchTokenToVocab(rawToken, lineDeLower, entries) {
     if (variants.includes(lower)) return true;
     if (e.plural && e.plural !== "— (Sg.)") {
       const pl = e.plural.replace(/^die\s+/i, "").trim().toLowerCase();
-      if (pl === lower) return true;
+      if (pl === lower || pl + "n" === lower) return true;
     }
     return false;
   });
@@ -78,7 +153,7 @@ function matchTokenToVocab(rawToken, lineDeLower, entries) {
     return nonNoun || exactCandidates[0];
   }
 
-  // 2. Separable verb check (e.g. "stelle ... vor" -> vorstellen, "ordnen ... zu" -> zuordnen)
+  // 2. Separable verb check
   for (const e of entries) {
     if (e.category === "verbs" && e.prefix && e.baseVerb) {
       const baseStem = e.baseVerb.toLowerCase().replace(/(en|n)$/, "");
@@ -93,16 +168,20 @@ function matchTokenToVocab(rawToken, lineDeLower, entries) {
     }
   }
 
-  // 3. Inflected verb forms (sein, haben, sprechen, lesen, fahren, regular stems)
+  // 3. Irregular & stem-vowel change verbs
   const irregularMap = {
-    bin: "sein", bist: "sein", ist: "sein", sind: "sein", seid: "sein",
+    bin: "sein", bist: "sein", ist: "sein", sind: "sein", seid: "sein", seien: "sein",
     habe: "haben", hast: "haben", hat: "haben", habt: "haben",
     sprichst: "sprechen", spricht: "sprechen", sprecht: "sprechen", sprich: "sprechen",
-    liest: "lesen", lest: "lesen",
-    fährst: "fahren", fährt: "fahren",
-    gibst: "geben", gibt: "geben",
-    helfe: "helfen", hilfst: "helfen", hilft: "helfen",
-    sammle: "sammeln", sammelst: "sammeln"
+    liest: "lesen", lest: "lesen", lies: "lesen",
+    siehst: "sehen", sieht: "sehen", seht: "sehen", sieh: "sehen",
+    fährst: "fahren", fährt: "fahren", fahrt: "fahren",
+    gibst: "geben", gibt: "geben", gebt: "geben",
+    nimmst: "nehmen", nimmt: "nehmen", nehmt: "nehmen",
+    stehst: "stehen", steht: "stehen",
+    sammle: "sammeln", sammelst: "sammeln",
+    zeichne: "zeichnen", zeichnest: "zeichnen",
+    würfle: "würfeln", würfelst: "würfeln"
   };
   if (irregularMap[lower]) {
     const found = entries.find(e => e.category === "verbs" && e.german.toLowerCase() === irregularMap[lower]);
@@ -127,7 +206,7 @@ function matchTokenToVocab(rawToken, lineDeLower, entries) {
     }
   }
 
-  // 4. Inflected adjectives / determiners (kurzes -> kurz, mein/meine/meiner/meinem/meinen, etc.)
+  // 4. Inflected adjectives / determiners
   for (const e of entries) {
     if (e.category === "adjectives" || e.category === "phrases") {
       const variants = e.german.toLowerCase().split(",").map(s => s.trim());
@@ -143,10 +222,10 @@ function matchTokenToVocab(rawToken, lineDeLower, entries) {
     }
   }
 
-  // 5. Multi-word phrase containment (e.g., "Wiedersehen" -> "auf Wiedersehen", "bisschen" -> "ein bisschen")
+  // 5. Multi-word phrase containment
   for (const e of entries) {
     const gLower = e.german.toLowerCase();
-    if (gLower.includes(" ") && lineDeLower.includes(gLower)) {
+    if (gLower.includes(" ") && !gLower.includes(",") && lineDeLower.includes(gLower)) {
       const parts = gLower.split(/\s+/);
       if (parts.includes(lower) && lower.length > 2) return e;
     }
@@ -155,54 +234,67 @@ function matchTokenToVocab(rawToken, lineDeLower, entries) {
   return null;
 }
 
-async function synthesizeLine(voiceId, text) {
-  const tts = new MsEdgeTTS();
-  try {
-    await tts.setMetadata(voiceId, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3, {
-      wordBoundaryEnabled: true
-    });
-    const { audioStream, metadataStream } = tts.toStream(text);
-    const audioChunks = [];
-    const wordBoundaries = [];
+async function synthesizeLineWithRetry(voiceId, text, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    const tts = new MsEdgeTTS();
+    try {
+      await tts.setMetadata(voiceId, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3, {
+        wordBoundaryEnabled: true
+      });
+      const { audioStream, metadataStream } = tts.toStream(text);
+      const audioChunks = [];
+      const wordBoundaries = [];
 
-    audioStream.on("data", chunk => audioChunks.push(chunk));
-    if (metadataStream) {
-      metadataStream.on("data", raw => {
-        try {
-          const parsed = JSON.parse(raw.toString());
-          if (Array.isArray(parsed.Metadata)) {
-            for (const m of parsed.Metadata) {
-              if (m.Type === "WordBoundary" && m.Data) {
-                wordBoundaries.push({
-                  text: m.Data.text?.Text || "",
-                  offsetMs: Math.round((m.Data.Offset || 0) / 10000),
-                  durationMs: Math.round((m.Data.Duration || 0) / 10000)
-                });
+      audioStream.on("data", chunk => audioChunks.push(chunk));
+      if (metadataStream) {
+        metadataStream.on("data", raw => {
+          try {
+            const parsed = JSON.parse(raw.toString());
+            if (Array.isArray(parsed.Metadata)) {
+              for (const m of parsed.Metadata) {
+                if (m.Type === "WordBoundary" && m.Data) {
+                  wordBoundaries.push({
+                    text: m.Data.text?.Text || "",
+                    offsetMs: Math.round((m.Data.Offset || 0) / 10000),
+                    durationMs: Math.round((m.Data.Duration || 0) / 10000)
+                  });
+                }
               }
             }
+          } catch {
+            // ignore partial metadata parse errors
           }
-        } catch {
-          // ignore partial metadata parse errors
-        }
+        });
+      }
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("TTS stream timeout")), 25000);
+        audioStream.on("end", () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+        audioStream.on("error", err => {
+          clearTimeout(timeout);
+          reject(err);
+        });
       });
-    }
 
-    await new Promise((resolve, reject) => {
-      audioStream.on("end", resolve);
-      audioStream.on("error", reject);
-    });
-
-    return { buffer: Buffer.concat(audioChunks), wordBoundaries };
-  } finally {
-    try {
-      tts.close();
-    } catch {
-      // ignore close errors
+      const buffer = Buffer.concat(audioChunks);
+      if (buffer.length === 0) throw new Error("Empty audio buffer");
+      return { buffer, wordBoundaries };
+    } catch (err) {
+      if (attempt === retries) throw err;
+      await new Promise(r => setTimeout(r, 800 * attempt));
+    } finally {
+      try {
+        tts.close();
+      } catch {
+        // ignore close errors
+      }
     }
   }
 }
 
-// Align display whitespace tokens in line.de with TTS WordBoundary timings
 function alignDisplayTokens(lineDe, wordBoundaries, lineStartOffsetMs, lineDurationMs, entries) {
   const rawTokens = lineDe.trim().split(/\s+/);
   const lineDeLower = lineDe.toLowerCase();
@@ -213,7 +305,7 @@ function alignDisplayTokens(lineDe, wordBoundaries, lineStartOffsetMs, lineDurat
     let matchedWb = null;
 
     if (stripped) {
-      for (let look = wbIdx; look < Math.min(wbIdx + 4, wordBoundaries.length); look++) {
+      for (let look = wbIdx; look < Math.min(wbIdx + 5, wordBoundaries.length); look++) {
         const wbClean = wordBoundaries[look].text.replace(/[^a-zA-ZäöüÄÖÜß0-9]/g, "").toLowerCase();
         if (wbClean && (wbClean === stripped || stripped.includes(wbClean) || wbClean.includes(stripped))) {
           matchedWb = wordBoundaries[look];
@@ -223,7 +315,6 @@ function alignDisplayTokens(lineDe, wordBoundaries, lineStartOffsetMs, lineDurat
       }
     }
 
-    // Fallback proportional timing if punctuation-only token (e.g. "—")
     const fallbackStart = lineStartOffsetMs + Math.round((idx / rawTokens.length) * lineDurationMs);
     const startMs = matchedWb ? lineStartOffsetMs + matchedWb.offsetMs : fallbackStart;
     const endMs = matchedWb
@@ -243,7 +334,8 @@ function alignDisplayTokens(lineDe, wordBoundaries, lineStartOffsetMs, lineDurat
 
 async function processConversation(conv) {
   const mp3Path = path.join(AUDIO_DIR, `${conv.id}.mp3`);
-  const entries = buildChapterLookup(conv.chapters);
+  const isMix = conv.chapters.length > 1;
+  const entries = buildChapterLookup(conv.chapters, isMix);
   const audioParts = [];
   const processedLines = [];
   const usedVocabMap = new Map();
@@ -253,24 +345,21 @@ async function processConversation(conv) {
   for (let i = 0; i < conv.lines.length; i++) {
     const line = conv.lines[i];
     const speakerInfo = conv.speakers[line.speaker];
-    const voiceObj = VOICES[speakerInfo.voice];
+    const voiceObj = VOICES[speakerInfo.voice] || VOICES.seraphina;
 
-    // Replace isolated " – " spelled letter dashes with slight pauses so TTS reads single letters crisply
-    const ttsText = line.de.replace(/\s–\s/g, ", ");
-    const { buffer, wordBoundaries } = await synthesizeLine(voiceObj.id, ttsText);
+    const ttsText = line.de.replace(/\s[–—-]\s([A-ZÄÖÜ])\b/g, ", $1");
+    const { buffer, wordBoundaries } = await synthesizeLineWithRetry(voiceObj.id, ttsText);
 
     if (!silentFrame && buffer.length >= 144) {
       silentFrame = buffer.subarray(buffer.length - 144);
     }
 
-    // Exact 48kbps CBR MP3 math: 48,000 bits/s = 6,000 bytes/s = 6 bytes/ms
     const lineStartMs = Math.round(currentBytes / 6);
     const lineDurationMs = Math.round(buffer.length / 6);
     const lineEndMs = lineStartMs + lineDurationMs;
 
     const tokens = alignDisplayTokens(line.de, wordBoundaries, lineStartMs, lineDurationMs, entries);
 
-    // Also scan full line for multi-word phrases / all matched vocab so sidebar never misses a phrase
     const lineLower = line.de.toLowerCase();
     for (const t of tokens) {
       if (t.vocabKey) {
@@ -299,9 +388,9 @@ async function processConversation(conv) {
     audioParts.push(buffer);
     currentBytes += buffer.length;
 
-    // Add ~288ms natural conversational pause (12 x 24ms silent MP3 frames) between turns
+    // ~312ms natural conversational pause between turns
     if (silentFrame && i < conv.lines.length - 1) {
-      const pauseBuf = Buffer.concat(Array(12).fill(silentFrame));
+      const pauseBuf = Buffer.concat(Array(13).fill(silentFrame));
       audioParts.push(pauseBuf);
       currentBytes += pauseBuf.length;
     }
@@ -313,12 +402,17 @@ async function processConversation(conv) {
   const totalDurationMs = Math.round(currentBytes / 6);
   const usedVocab = Array.from(usedVocabMap.values());
 
-  console.log(`✓ ${conv.id} (${(finalMp3.length / 1024).toFixed(0)} KB, ${(totalDurationMs / 1000).toFixed(1)}s, ${usedVocab.length} words)`);
+  console.log(
+    `✓ ${conv.id} [${conv.lengthTier || "medium"}] (${(finalMp3.length / 1024).toFixed(0)} KB, ${(
+      totalDurationMs / 1000
+    ).toFixed(1)}s, ${conv.lines.length} turns, ${usedVocab.length} words)`
+  );
 
   return {
     id: conv.id,
     chapters: conv.chapters,
-    isMix: conv.chapters.length > 1,
+    isMix,
+    lengthTier: conv.lengthTier || (totalDurationMs >= 105000 ? "long" : "medium"),
     category: conv.category,
     title: conv.title,
     context: conv.context,
@@ -326,25 +420,42 @@ async function processConversation(conv) {
     durationMs: totalDurationMs,
     speakers: conv.speakers,
     lines: processedLines,
-    usedVocab
+    usedVocabKeys: usedVocab.map(v => v.key)
   };
 }
 
 async function main() {
-  const allConvs = [...KAP1_CONVERSATIONS, ...MIXER_CONVERSATIONS];
-  const results = [];
+  const allConvs = [
+    ...KAP1_EXTENDED_CONVERSATIONS,
+    ...KAP2_EXTENDED_CONVERSATIONS,
+    ...KAP3_EXTENDED_CONVERSATIONS,
+    ...EXTENDED_MIXER_CONVERSATIONS
+  ];
 
-  console.log(`Generating ${allConvs.length} neural multi-speaker conversations...`);
-  // Process with concurrency of 3 for fast, reliable generation
-  const CONCURRENCY = 3;
-  for (let i = 0; i < allConvs.length; i += CONCURRENCY) {
-    const batch = allConvs.slice(i, i + CONCURRENCY);
-    const batchOut = await Promise.all(batch.map(c => processConversation(c)));
-    results.push(...batchOut);
+  // Clean obsolete MP3s not in current manifest
+  const validFiles = new Set(allConvs.map(c => `${c.id}.mp3`));
+  for (const existing of fs.readdirSync(AUDIO_DIR)) {
+    if (existing.endsWith(".mp3") && !validFiles.has(existing)) {
+      fs.unlinkSync(path.join(AUDIO_DIR, existing));
+    }
   }
 
+  console.log(`Generating ${allConvs.length} extensive multi-speaker conversations...`);
+  const results = new Array(allConvs.length);
+  let cursor = 0;
+  const CONCURRENCY = 6;
+
+  async function worker() {
+    while (cursor < allConvs.length) {
+      const idx = cursor++;
+      results[idx] = await processConversation(allConvs[idx]);
+    }
+  }
+
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+
   fs.writeFileSync(OUT_JSON, JSON.stringify(results, null, 2));
-  console.log(`\nSaved ${results.length} conversations to ${OUT_JSON}`);
+  console.log(`\nSaved ${results.length} extensive conversations to ${OUT_JSON}`);
 }
 
 main().catch(err => {

@@ -1,6 +1,11 @@
 import { NETZWERK_CHAPTERS } from "./data/netzwerkData.js";
 import { NETZWERK_A1_CHAPTER_VOCAB } from "./data/netzwerkChapterVocab.js";
 import { NETZWERK_A2_CHAPTER_VOCAB } from "./data/netzwerkA2ChapterVocab.js";
+import {
+  SPOKEN_EXPRESSIONS,
+  ENDINGS_REFERENCE_TABLES,
+  explainWordEnding
+} from "./data/germanEndings.js";
 import CONVERSATIONS from "./data/conversations/generatedConversations.json";
 
 // Feature-detect Popover API for older browsers
@@ -9,7 +14,7 @@ if (!("popover" in HTMLElement.prototype)) {
 }
 
 const AUDIO_BASE_URL = import.meta.env.VITE_AUDIO_BASE_URL || "/audio";
-const STORAGE_KEY = "horen_listening_progress_v1";
+const STORAGE_KEY = "horen_listening_progress_v2";
 const SPEEDS = [1.0, 0.85, 0.75, 1.15];
 
 const POS_LABELS = {
@@ -18,7 +23,8 @@ const POS_LABELS = {
   adjectives: "Adjectives",
   adverbs: "Adverbs",
   prepositions: "Prepositions",
-  phrases: "Phrases & Forms"
+  phrases: "Phrases & Forms",
+  closings: "Spoken Closings & Fillers"
 };
 
 const POS_SINGULAR = {
@@ -27,15 +33,25 @@ const POS_SINGULAR = {
   adjectives: "Adjective",
   adverbs: "Adverb",
   prepositions: "Preposition",
-  phrases: "Phrase"
+  phrases: "Phrase",
+  closings: "Spoken Expression"
 };
 
-// ─── Build Global Vocab Map ───
-function cleanVocabGerman(raw) {
-  let g = (raw || "").trim();
-  if (g.startsWith("sie (")) return "sie";
-  if (g === "einbisschen") return "ein bisschen";
-  return g;
+// ─── Clean & Index Chapter Vocabulary ───
+function cleanVocabItem(rawGerman, rawEnglish) {
+  let g = (rawGerman || "").trim();
+  let en = (rawEnglish || "").trim();
+  if (!g || g.startsWith(",")) return null;
+  if (g.startsWith("sie (")) g = "sie";
+  if (g === "einbisschen") g = "ein bisschen";
+  if (g === "Sportun") {
+    g = "Sportart";
+    en = "type of sport";
+  }
+  if (en === "unasnu") en = "museum";
+  if (en === "siow") en = "slow";
+  if (en === "to great") en = "to greet";
+  return { german: g, english: en };
 }
 
 const GLOBAL_VOCAB_MAP = new Map();
@@ -47,20 +63,22 @@ function indexLevelVocab(levelKey, rawSource) {
     const seen = new Set();
     for (const [category, arr] of Object.entries(chObj)) {
       for (const item of arr) {
-        const displayGerman = cleanVocabGerman(item.german);
-        const dedupKey = `${category}:${displayGerman.toLowerCase()}`;
+        const cleaned = cleanVocabItem(item.german, item.english);
+        if (!cleaned) continue;
+        const dedupKey = `${category}:${cleaned.german.toLowerCase()}`;
         const fullKey = `${chId}:${dedupKey}`;
         const normalized = {
           key: fullKey,
-          rawIndexKey: `${levelKey}:${fullKey}`,
           level: levelKey,
           chapter: chId,
           category,
-          german: displayGerman,
+          german: cleaned.german,
           article: item.article && item.article !== "—" ? item.article : null,
           plural: item.plural || null,
-          english: item.english || "",
+          english: cleaned.english,
           subType: item.subType || null,
+          prefix: item.prefix || null,
+          baseVerb: item.baseVerb || null,
           exampleA1: item.exampleA1 || "",
           exampleEn: item.exampleEn || ""
         };
@@ -80,19 +98,31 @@ function indexLevelVocab(levelKey, rawSource) {
 indexLevelVocab("A1", NETZWERK_A1_CHAPTER_VOCAB);
 indexLevelVocab("A2", NETZWERK_A2_CHAPTER_VOCAB);
 
-// Also index any usedVocab from conversations directly
-for (const conv of CONVERSATIONS) {
-  for (const v of conv.usedVocab || []) {
-    if (!GLOBAL_VOCAB_MAP.has(v.key)) {
-      GLOBAL_VOCAB_MAP.set(v.key, v);
-    }
-  }
+for (const exp of SPOKEN_EXPRESSIONS) {
+  const key = `spoken:closings:${exp.german.toLowerCase()}`;
+  GLOBAL_VOCAB_MAP.set(key, {
+    key,
+    chapter: "spoken",
+    category: "closings",
+    german: exp.german,
+    article: null,
+    plural: null,
+    english: exp.english,
+    subType: exp.type,
+    exampleA1: exp.usage,
+    exampleEn: ""
+  });
+}
+
+function getClipUsedVocab(conv) {
+  if (conv.usedVocab) return conv.usedVocab;
+  return (conv.usedVocabKeys || []).map(k => GLOBAL_VOCAB_MAP.get(k)).filter(Boolean);
 }
 
 // ─── Persistent Local Progress ───
 function loadProgress() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem("horen_listening_progress_v1");
     if (!raw) return { heardKeys: {}, completedClips: {}, lastClipId: "kap1-01" };
     const parsed = JSON.parse(raw);
     return {
@@ -119,15 +149,19 @@ function scheduleSave() {
   }, 400);
 }
 
+const AVAILABLE_AUDIO_CHAPTERS = [...new Set(CONVERSATIONS.filter(c => !c.isMix).map(c => c.chapters[0]))];
+
 // ─── Application State ───
+const initialClip = CONVERSATIONS.find(c => c.id === progress.lastClipId) || CONVERSATIONS[0];
 const state = {
-  mode: "listen", // 'listen' | 'syllabus' | 'mixer'
+  mode: "listen",
+  activeChapter: initialClip && !initialClip.isMix ? initialClip.chapters[0] : "kap-1",
   activeCategory: "All",
-  playlist: CONVERSATIONS.filter(c => !c.isMix),
-  currentClip: CONVERSATIONS.find(c => c.id === progress.lastClipId) || CONVERSATIONS[0],
+  playlist: [],
+  currentClip: initialClip,
   showEnglish: false,
   speedIndex: 0,
-  wasPlayingBeforeLookup: false,
+  modalSelectedTab: initialClip?.isMix ? "mix" : initialClip?.chapters[0] || "kap-1",
 
   // Syllabus state
   syllabusLevel: "A1",
@@ -153,6 +187,7 @@ const clipWordsCount = document.getElementById("clipWordsCount");
 const categoryFilterBar = document.getElementById("categoryFilterBar");
 const episodeCounter = document.getElementById("episodeCounter");
 const episodeCategory = document.getElementById("episodeCategory");
+const episodeLengthBadge = document.getElementById("episodeLengthBadge");
 const episodeTitle = document.getElementById("episodeTitle");
 const episodeContext = document.getElementById("episodeContext");
 const transcriptContainer = document.getElementById("transcriptContainer");
@@ -169,6 +204,7 @@ const toggleEnBtn = document.getElementById("toggleEnBtn");
 const wordsDrawer = document.getElementById("wordsDrawer");
 const drawerWordsContent = document.getElementById("drawerWordsContent");
 const episodesDialog = document.getElementById("episodesDialog");
+const modalChapterTabs = document.getElementById("modalChapterTabs");
 const episodesListBody = document.getElementById("episodesListBody");
 const wordPopover = document.getElementById("wordPopover");
 const wordPopoverBody = document.getElementById("wordPopoverBody");
@@ -267,14 +303,16 @@ function pronounceSingleWord(text) {
   window.speechSynthesis.speak(utter);
 }
 
-// ─── Update Coverage Pill ───
+// ─── Update Coverage Pill for Active Chapter ───
 function updateCoverageBadge() {
-  const kap1Total = (CHAPTER_NORMALIZED_VOCAB.A1["kap-1"] || []).length;
+  const chKey = state.activeChapter || "kap-1";
+  const chWords = CHAPTER_NORMALIZED_VOCAB.A1[chKey] || [];
   let heard = 0;
-  for (const item of CHAPTER_NORMALIZED_VOCAB.A1["kap-1"] || []) {
+  for (const item of chWords) {
     if (progress.heardKeys[item.key]) heard++;
   }
-  coverageText.textContent = `${heard} / ${kap1Total} heard`;
+  const chNum = chKey.replace("kap-", "");
+  coverageText.textContent = `Kap. ${chNum}: ${heard} / ${chWords.length} heard`;
 }
 
 // ─── Switch Top-Level Views ───
@@ -295,26 +333,40 @@ function setMode(mode) {
   }
 }
 
-// ─── Render Category Strip & Load Conversation ───
-function rebuildPlaylistForCategory(category) {
+// ─── Render Category Strip & Playlist for Active Chapter ───
+function rebuildPlaylistForChapter(chId, category = "All") {
+  state.activeChapter = chId;
   state.activeCategory = category;
-  const singleClips = CONVERSATIONS.filter(c => !c.isMix);
+  const chapterClips = CONVERSATIONS.filter(c => !c.isMix && c.chapters[0] === chId);
   if (category === "All") {
-    state.playlist = singleClips;
+    state.playlist = chapterClips;
   } else {
-    state.playlist = singleClips.filter(c => c.category === category);
+    state.playlist = chapterClips.filter(c => c.category === category);
   }
+  updateCoverageBadge();
   renderCategoryStrip();
 }
 
 function renderCategoryStrip() {
-  const singleClips = CONVERSATIONS.filter(c => !c.isMix);
-  const categories = ["All", ...new Set(singleClips.map(c => c.category))];
+  if (state.currentClip?.isMix) {
+    categoryFilterBar.innerHTML = `<span class="cat-pill is-active">${escapeHtml(state.currentClip.category)}</span>
+      <button class="cat-pill" type="button" id="exitMixBtn">← Back to ${escapeHtml(
+        `Kapitel ${state.activeChapter.replace("kap-", "")}`
+      )}</button>`;
+    document.getElementById("exitMixBtn")?.addEventListener("click", () => {
+      rebuildPlaylistForChapter(state.activeChapter, "All");
+      if (state.playlist[0]) loadConversation(state.playlist[0], false);
+    });
+    return;
+  }
+
+  const chapterClips = CONVERSATIONS.filter(c => !c.isMix && c.chapters[0] === state.activeChapter);
+  const categories = ["All", ...new Set(chapterClips.map(c => c.category))];
 
   categoryFilterBar.innerHTML = categories
     .map(cat => {
-      const active = state.activeCategory === cat && !state.currentClip.isMix ? "is-active" : "";
-      const label = cat === "All" ? `All (${singleClips.length})` : cat;
+      const active = state.activeCategory === cat ? "is-active" : "";
+      const label = cat === "All" ? `All (${chapterClips.length})` : cat;
       return `<button class="cat-pill ${active}" type="button" data-cat="${escapeHtml(cat)}">${escapeHtml(label)}</button>`;
     })
     .join("");
@@ -322,7 +374,7 @@ function renderCategoryStrip() {
   categoryFilterBar.querySelectorAll(".cat-pill").forEach(btn => {
     btn.addEventListener("click", () => {
       const cat = btn.dataset.cat;
-      rebuildPlaylistForCategory(cat);
+      rebuildPlaylistForChapter(state.activeChapter, cat);
       if (state.playlist.length > 0 && !state.playlist.some(c => c.id === state.currentClip.id)) {
         loadConversation(state.playlist[0], false);
       }
@@ -342,8 +394,11 @@ function loadConversation(conv, autoplay = false) {
     const chNums = conv.chapters.map(c => c.replace("kap-", "")).join(" + ");
     currentChapterLabel.textContent = `A1 · Mix (${chNums})`;
   } else {
+    state.activeChapter = conv.chapters[0];
     currentChapterLabel.textContent = `A1 · Kapitel ${conv.chapters[0].replace("kap-", "")}`;
   }
+
+  updateCoverageBadge();
 
   const idxInList = state.playlist.findIndex(c => c.id === conv.id);
   const posText =
@@ -353,9 +408,18 @@ function loadConversation(conv, autoplay = false) {
 
   episodeCounter.textContent = posText;
   episodeCategory.textContent = conv.category;
+
+  const isLong = conv.lengthTier === "long" || conv.durationMs >= 105000;
+  if (episodeLengthBadge) {
+    episodeLengthBadge.textContent = isLong
+      ? `Long · ${formatTime(conv.durationMs)}`
+      : `Medium · ${formatTime(conv.durationMs)}`;
+    episodeLengthBadge.classList.toggle("is-long", isLong);
+  }
+
   episodeTitle.textContent = conv.title;
   episodeContext.textContent = conv.context;
-  clipWordsCount.textContent = String((conv.usedVocab || []).length);
+  clipWordsCount.textContent = String(getClipUsedVocab(conv).length);
 
   renderCategoryStrip();
   renderTranscript(conv);
@@ -432,14 +496,14 @@ function renderTranscript(conv) {
   });
 }
 
-// ─── Render Right-Side Words Drawer (Hidden by default until opened) ───
+// ─── Render Right-Side Words Drawer (Hidden by default) ───
 function renderWordsDrawer(conv) {
   const grouped = {};
   for (const pos of Object.keys(POS_LABELS)) grouped[pos] = [];
 
-  for (const item of conv.usedVocab || []) {
-    if (!grouped[item.category]) grouped[item.category] = [];
-    grouped[item.category].push(item);
+  for (const item of getClipUsedVocab(conv)) {
+    const bucket = grouped[item.category] ? item.category : "phrases";
+    grouped[bucket].push(item);
   }
 
   let html = "";
@@ -470,18 +534,28 @@ function renderWordsDrawer(conv) {
   drawerWordsContent.innerHTML = html || `<p class="muted-meta">No tagged vocabulary in this clip.</p>`;
 }
 
-// ─── Tap Any Word -> Pause & Show Popover ───
+// ─── Tap Any Word -> Pause & Show Meaning + Grammatical Ending Breakdown ───
 function handleWordClick(targetEl, tok, line) {
-  state.wasPlayingBeforeLookup = !audio.paused;
   if (!audio.paused) {
     audio.pause();
   }
 
   const entry = tok.vocabKey ? GLOBAL_VOCAB_MAP.get(tok.vocabKey) : null;
-  const cleanSurface = tok.text.replace(/^[^a-zA-ZäöüÄÖÜß0-9-]+|[^a-zA-ZäöüÄÖÜß0-9-]+$/g, "");
+  const cleanSurface = tok.text.replace(/^[^a-zA-ZäöüÄÖÜß0-9'-]+|[^a-zA-ZäöüÄÖÜß0-9'-]+$/g, "");
+  const endingInfo = explainWordEnding(cleanSurface, entry, line.de);
+
+  const endingHtml = endingInfo
+    ? `<div class="wp-ending-box">
+        <div class="wp-ending-badge">${escapeHtml(endingInfo.badge)}</div>
+        <div class="wp-ending-desc">${escapeHtml(endingInfo.explanation)}</div>
+      </div>`
+    : "";
 
   if (entry) {
-    const chDisplay = `A1 · Kap. ${entry.chapter.replace("kap-", "")}`;
+    const chDisplay =
+      entry.chapter === "spoken"
+        ? "Everyday Spoken"
+        : `A1 · Kap. ${String(entry.chapter).replace("kap-", "")}`;
     const posName = POS_SINGULAR[entry.category] || entry.category;
     const headHtml =
       entry.category === "nouns"
@@ -503,9 +577,12 @@ function handleWordClick(targetEl, tok, line) {
       <h3 class="wp-headword">${headHtml}</h3>
       <p class="wp-subform">${subform}</p>
       <p class="wp-meaning">${escapeHtml(entry.english)}</p>
+      ${endingHtml}
       ${
         entry.exampleA1
-          ? `<p class="wp-example">“${escapeHtml(entry.exampleA1)}”<br/><span class="muted-meta">${escapeHtml(entry.exampleEn)}</span></p>`
+          ? `<p class="wp-example">“${escapeHtml(entry.exampleA1)}”${
+              entry.exampleEn ? `<br/><span class="muted-meta">${escapeHtml(entry.exampleEn)}</span>` : ""
+            }</p>`
           : ""
       }
       <div class="wp-actions">
@@ -521,11 +598,12 @@ function handleWordClick(targetEl, tok, line) {
   } else {
     wordPopoverBody.innerHTML = `
       <div class="wp-meta">
-        <span>Name / Context</span>
+        <span>${endingInfo ? "Grammar Form" : "Context"}</span>
         <span>Line Meaning</span>
       </div>
       <h3 class="wp-headword">${escapeHtml(cleanSurface || tok.text)}</h3>
       <p class="wp-meaning">${escapeHtml(line.en)}</p>
+      ${endingHtml}
       <div class="wp-actions">
         <button id="wpSpeakBtn" class="wp-btn" type="button">Pronounce</button>
         <button id="wpResumeBtn" class="wp-btn wp-btn-primary" type="button">Resume ▸</button>
@@ -543,15 +621,14 @@ function handleWordClick(targetEl, tok, line) {
 
   wordPopover.showPopover?.();
 
-  // Position cleanly near clicked word, clamped inside viewport
   const rect = targetEl.getBoundingClientRect();
   const popWidth = Math.min(320, window.innerWidth - 32);
   let left = rect.left + rect.width / 2 - popWidth / 2;
   left = Math.max(16, Math.min(left, window.innerWidth - popWidth - 16));
 
   let top = rect.bottom + 10;
-  if (top + 230 > window.innerHeight) {
-    top = Math.max(16, rect.top - 220);
+  if (top + 280 > window.innerHeight) {
+    top = Math.max(16, rect.top - 265);
   }
   wordPopover.style.left = `${Math.round(left)}px`;
   wordPopover.style.top = `${Math.round(top)}px`;
@@ -653,11 +730,8 @@ audio.addEventListener("loadedmetadata", () => {
 
 // ─── Transport Controls ───
 playPauseBtn.addEventListener("click", () => {
-  if (audio.paused) {
-    audio.play().catch(() => {});
-  } else {
-    audio.pause();
-  }
+  if (audio.paused) audio.play().catch(() => {});
+  else audio.pause();
 });
 
 seekSlider.addEventListener("input", () => {
@@ -675,27 +749,21 @@ document.getElementById("rewindBtn").addEventListener("click", () => {
 
 document.getElementById("prevClipBtn").addEventListener("click", () => {
   const idx = state.playlist.findIndex(c => c.id === state.currentClip.id);
-  if (idx > 0) {
-    loadConversation(state.playlist[idx - 1], true);
-  } else if (state.playlist.length > 0) {
-    loadConversation(state.playlist[state.playlist.length - 1], true);
-  }
+  if (idx > 0) loadConversation(state.playlist[idx - 1], true);
+  else if (state.playlist.length > 0) loadConversation(state.playlist[state.playlist.length - 1], true);
 });
 
 document.getElementById("nextClipBtn").addEventListener("click", () => {
   const idx = state.playlist.findIndex(c => c.id === state.currentClip.id);
-  if (idx >= 0 && idx < state.playlist.length - 1) {
-    loadConversation(state.playlist[idx + 1], true);
-  } else if (state.playlist.length > 0) {
-    loadConversation(state.playlist[0], true);
-  }
+  if (idx >= 0 && idx < state.playlist.length - 1) loadConversation(state.playlist[idx + 1], true);
+  else if (state.playlist.length > 0) loadConversation(state.playlist[0], true);
 });
 
 speedBtn.addEventListener("click", () => {
   state.speedIndex = (state.speedIndex + 1) % SPEEDS.length;
   const rate = SPEEDS[state.speedIndex];
   audio.playbackRate = rate;
-  speedBtn.textContent = `${rate.toFixed(rate === 1 || rate === 1.0 ? 1 : 2)}×`;
+  speedBtn.textContent = `${rate.toFixed(rate === 1 ? 1 : 2)}×`;
 });
 
 toggleEnBtn.addEventListener("click", () => {
@@ -707,7 +775,6 @@ toggleEnBtn.addEventListener("click", () => {
   });
 });
 
-// Spacebar shortcut to play/pause when not typing in search input
 document.addEventListener("keydown", e => {
   if (e.code === "Space" && state.mode === "listen") {
     const tag = document.activeElement?.tagName;
@@ -727,17 +794,45 @@ document.getElementById("openWordsDrawerBtn").addEventListener("click", openWord
 document.getElementById("bottomWordsBtn").addEventListener("click", openWordsDrawer);
 document.getElementById("closeWordsDrawerBtn").addEventListener("click", () => closeDialogSmoothly(wordsDrawer));
 
-function openEpisodesModal() {
-  episodesListBody.innerHTML = state.playlist
+function renderEpisodesModalList() {
+  const tabs = [
+    ...AVAILABLE_AUDIO_CHAPTERS.map(chId => ({
+      key: chId,
+      label: `Kapitel ${chId.replace("kap-", "")}`
+    })),
+    { key: "mix", label: "Combined Mixes" }
+  ];
+
+  modalChapterTabs.innerHTML = tabs
+    .map(t => {
+      const active = state.modalSelectedTab === t.key ? "is-active" : "";
+      return `<button class="cat-pill ${active}" type="button" data-mtab="${t.key}">${escapeHtml(t.label)}</button>`;
+    })
+    .join("");
+
+  modalChapterTabs.querySelectorAll(".cat-pill").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.modalSelectedTab = btn.dataset.mtab;
+      renderEpisodesModalList();
+    });
+  });
+
+  const clipsToShow =
+    state.modalSelectedTab === "mix"
+      ? CONVERSATIONS.filter(c => c.isMix)
+      : CONVERSATIONS.filter(c => !c.isMix && c.chapters[0] === state.modalSelectedTab);
+
+  episodesListBody.innerHTML = clipsToShow
     .map((c, idx) => {
       const done = progress.completedClips[c.id] ? " · ✓" : "";
       const curr = c.id === state.currentClip.id ? "is-current" : "";
+      const dur = formatTime(c.durationMs);
       return `<button class="episode-pick-row ${curr}" type="button" data-cid="${escapeHtml(c.id)}">
         <span class="ep-row-left">
           <span class="ep-row-num">${String(idx + 1).padStart(2, "0")}</span>
           <span class="ep-row-title">${escapeHtml(c.title)}${done}</span>
         </span>
-        <span class="ep-row-cat">${escapeHtml(c.category)}</span>
+        <span class="ep-row-cat">${escapeHtml(c.category)} · ${dur}</span>
       </button>`;
     })
     .join("");
@@ -746,13 +841,22 @@ function openEpisodesModal() {
     btn.addEventListener("click", () => {
       const found = CONVERSATIONS.find(c => c.id === btn.dataset.cid);
       if (found) {
+        if (found.isMix) {
+          state.playlist = CONVERSATIONS.filter(c => c.isMix);
+        } else {
+          rebuildPlaylistForChapter(found.chapters[0], "All");
+        }
         setMode("listen");
         loadConversation(found, true);
         closeDialogSmoothly(episodesDialog);
       }
     });
   });
+}
 
+function openEpisodesModal() {
+  state.modalSelectedTab = state.currentClip?.isMix ? "mix" : state.activeChapter;
+  renderEpisodesModalList();
   if (!episodesDialog.open) episodesDialog.showModal();
 }
 
@@ -763,7 +867,7 @@ document.getElementById("closeEpisodesDialogBtn").addEventListener("click", () =
 document.getElementById("brandBtn").addEventListener("click", () => setMode("listen"));
 document.getElementById("coverageBtn").addEventListener("click", () => {
   state.syllabusLevel = "A1";
-  state.syllabusChapter = "kap-1";
+  state.syllabusChapter = state.activeChapter || "kap-1";
   state.syllabusSubtab = "vocab";
   setMode("syllabus");
 });
@@ -772,7 +876,7 @@ document.querySelectorAll(".mode-tab").forEach(btn => {
   btn.addEventListener("click", () => setMode(btn.dataset.mode));
 });
 
-// ─── VIEW 2: Chapter Prep (Complete Vocabulary + Grammar Syllabus) ───
+// ─── VIEW 2: Chapter Prep (Complete Vocabulary + Grammar + Common Endings) ───
 function renderSyllabusView() {
   const chapters = NETZWERK_CHAPTERS[state.syllabusLevel] || [];
   const chMeta = chapters.find(c => c.id === state.syllabusChapter) || chapters[0];
@@ -801,10 +905,16 @@ function renderSyllabusView() {
   document.getElementById("syllabusSubtitle").textContent = chMeta.theme;
 
   const listenBtn = document.getElementById("startChapterListeningBtn");
-  const hasVoiceovers = state.syllabusLevel === "A1" && chMeta.id === "kap-1";
-  listenBtn.textContent = hasVoiceovers
-    ? `Practice Kapitel ${chMeta.number} Voiceovers (30) →`
-    : `Kapitel 1 Voiceovers Ready · Play Now →`;
+  const chapterClips = CONVERSATIONS.filter(
+    c => !c.isMix && state.syllabusLevel === "A1" && c.chapters[0] === chMeta.id
+  );
+  if (chapterClips.length > 0) {
+    listenBtn.textContent = `Practice Kapitel ${chMeta.number} Voiceovers (${chapterClips.length}) →`;
+    listenBtn.dataset.targetCh = chMeta.id;
+  } else {
+    listenBtn.textContent = `Jump to Available Voiceovers (Kap. 1–3) →`;
+    listenBtn.dataset.targetCh = "kap-1";
+  }
 
   document.querySelectorAll(".subtab-btn").forEach(btn => {
     btn.classList.toggle("is-active", btn.dataset.subtab === state.syllabusSubtab);
@@ -812,13 +922,18 @@ function renderSyllabusView() {
 
   const vocabPanel = document.getElementById("syllabusVocabPanel");
   const grammarPanel = document.getElementById("syllabusGrammarPanel");
+  const endingsPanel = document.getElementById("syllabusEndingsPanel");
+
   vocabPanel.hidden = state.syllabusSubtab !== "vocab";
   grammarPanel.hidden = state.syllabusSubtab !== "grammar";
+  endingsPanel.hidden = state.syllabusSubtab !== "endings";
 
   if (state.syllabusSubtab === "vocab") {
     renderSyllabusVocab(chMeta.id);
-  } else {
+  } else if (state.syllabusSubtab === "grammar") {
     renderSyllabusGrammar(chMeta);
+  } else {
+    renderSyllabusEndings();
   }
 }
 
@@ -862,7 +977,6 @@ function renderSyllabusVocab(chId) {
   const grid = document.getElementById("syllabusVocabList");
   grid.innerHTML = filtered
     .map((w, idx) => {
-      // Only defer off-screen items below initial fold (index >= 12)
       const deferCls = idx >= 12 ? "vocab-card-deferred" : "";
       const heard = state.syllabusLevel === "A1" && progress.heardKeys[w.key];
       const art = w.category === "nouns" ? articleBadgeHtml(w.article) : "";
@@ -877,7 +991,11 @@ function renderSyllabusVocab(chId) {
         <div>
           <div class="vc-top">
             <span class="vc-word">${art}${escapeHtml(w.german)}</span>
-            ${heard ? `<span class="vc-heard-dot">Heard</span>` : `<span class="muted-meta" style="font-size:0.72rem">${escapeHtml(POS_SINGULAR[w.category])}</span>`}
+            ${
+              heard
+                ? `<span class="vc-heard-dot">Heard</span>`
+                : `<span class="muted-meta" style="font-size:0.72rem">${escapeHtml(POS_SINGULAR[w.category])}</span>`
+            }
           </div>
           ${pl}
           <div class="vc-en">${escapeHtml(w.english)}</div>
@@ -914,6 +1032,60 @@ function renderSyllabusGrammar(chMeta) {
     .join("");
 }
 
+function renderSyllabusEndings() {
+  const container = document.getElementById("endingsContentList");
+  const tablesHtml = ENDINGS_REFERENCE_TABLES.map(
+    tbl => `<article class="grammar-card">
+      <h3 class="gc-title">${escapeHtml(tbl.title)}</h3>
+      <p class="gc-rule">${escapeHtml(tbl.subtitle)}</p>
+      <table class="endings-table">
+        <thead>
+          <tr>
+            <th>Ending</th>
+            <th>Pattern &amp; Examples</th>
+            <th>When It Appears</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tbl.rows
+            .map(
+              r => `<tr>
+              <td class="ending-code">${escapeHtml(r.ending)}</td>
+              <td><strong>${escapeHtml(r.pattern)}</strong></td>
+              <td class="muted-meta">${escapeHtml(r.note)}</td>
+            </tr>`
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </article>`
+  ).join("");
+
+  const closingsHtml = `<article class="grammar-card">
+    <h3 class="gc-title">5. Everyday Spoken Closings, Greetings &amp; Fillers</h3>
+    <p class="gc-rule">Natural expressions used by German speakers to open, react, and end conversations smoothly. Click any card to hear pronunciation.</p>
+    <div class="vocab-grid" style="margin-top:14px">
+      ${SPOKEN_EXPRESSIONS.map(
+        exp => `<div class="vocab-card expr-speak-card" data-speak="${escapeHtml(exp.german)}" style="cursor:pointer">
+          <div>
+            <div class="vc-top">
+              <span class="vc-word">${escapeHtml(exp.german)}</span>
+              <span class="muted-meta" style="font-size:0.72rem">${escapeHtml(exp.type)}</span>
+            </div>
+            <div class="vc-en">${escapeHtml(exp.english)}</div>
+          </div>
+          <div class="vc-ex">${escapeHtml(exp.usage)}</div>
+        </div>`
+      ).join("")}
+    </div>
+  </article>`;
+
+  container.innerHTML = tablesHtml + closingsHtml;
+  container.querySelectorAll(".expr-speak-card").forEach(card => {
+    card.addEventListener("click", () => pronounceSingleWord(card.dataset.speak));
+  });
+}
+
 document.querySelectorAll(".level-pill").forEach(btn => {
   btn.addEventListener("click", () => {
     state.syllabusLevel = btn.dataset.level;
@@ -934,15 +1106,16 @@ document.getElementById("vocabSearchInput").addEventListener("input", e => {
   renderSyllabusVocab(state.syllabusChapter);
 });
 
-document.getElementById("startChapterListeningBtn").addEventListener("click", () => {
-  rebuildPlaylistForCategory("All");
-  loadConversation(state.playlist[0], false);
+document.getElementById("startChapterListeningBtn").addEventListener("click", e => {
+  const targetCh = e.currentTarget.dataset.targetCh || "kap-1";
+  rebuildPlaylistForChapter(targetCh, "All");
+  if (state.playlist[0]) loadConversation(state.playlist[0], false);
   setMode("listen");
 });
 
 // ─── VIEW 3: Combine Chapters (Mixer) ───
 function renderMixerView() {
-  const activeMixChapters = new Set(["kap-1", "kap-2", "kap-3"]);
+  const activeMixChapters = new Set(AVAILABLE_AUDIO_CHAPTERS);
   const boxGrid = document.getElementById("mixerCheckboxes");
 
   boxGrid.innerHTML = NETZWERK_CHAPTERS.A1.map(ch => {
@@ -971,7 +1144,6 @@ function renderMixerView() {
     });
   });
 
-  // Unlock every conversation whose required chapters are a subset of state.mixerSelected
   const eligibleMixes = CONVERSATIONS.filter(
     c => c.isMix && c.chapters.every(ch => state.mixerSelected.has(ch))
   );
@@ -980,18 +1152,18 @@ function renderMixerView() {
   );
 
   const combinedPool = [...eligibleMixes, ...eligibleSingles];
-  document.getElementById("mixerResultsCount").textContent = `${eligibleMixes.length} cross-chapter mixes · ${eligibleSingles.length} single-chapter clips`;
+  document.getElementById("mixerResultsCount").textContent = `${eligibleMixes.length} cross-chapter mixes · ${eligibleSingles.length} chapter clips`;
 
   const clipsGrid = document.getElementById("mixerClipsGrid");
   if (eligibleMixes.length === 0) {
-    clipsGrid.innerHTML = `<p class="muted-meta">Select at least two chapters (e.g., Kapitel 1 + Kapitel 2 or Kapitel 1 + Kapitel 3) to unlock combined conversations.</p>`;
+    clipsGrid.innerHTML = `<p class="muted-meta">Select at least two chapters (for example Kapitel 1 + 2, Kapitel 1 + 3, or Kapitel 2 + 3) to unlock combined conversations.</p>`;
     return;
   }
 
   clipsGrid.innerHTML = eligibleMixes
     .map(
       c => `<button class="clip-select-card" type="button" data-mixid="${escapeHtml(c.id)}">
-      <span class="csc-badge">${escapeHtml(c.category)}</span>
+      <span class="csc-badge">${escapeHtml(c.category)} · ${formatTime(c.durationMs)}</span>
       <h4 class="csc-title">${escapeHtml(c.title)}</h4>
       <p class="csc-desc">${escapeHtml(c.context)}</p>
     </button>`
@@ -1011,6 +1183,9 @@ function renderMixerView() {
 }
 
 // ─── Initialize App ───
-updateCoverageBadge();
-rebuildPlaylistForCategory("All");
+if (state.currentClip?.isMix) {
+  state.playlist = CONVERSATIONS.filter(c => c.isMix);
+} else {
+  rebuildPlaylistForChapter(state.activeChapter, "All");
+}
 loadConversation(state.currentClip, false);

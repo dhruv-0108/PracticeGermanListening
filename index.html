@@ -57,9 +57,10 @@
           <!-- Episode Header -->
           <div class="episode-header">
             <div class="episode-kicker-row">
-              <span id="episodeCounter" class="episode-counter">01 / 30</span>
+              <span id="episodeCounter" class="episode-counter">01 / 25</span>
               <span class="dot-sep" aria-hidden="true">·</span>
-              <span id="episodeCategory" class="episode-category">Begrüßung & Kennenlernen</span>
+              <span id="episodeCategory" class="episode-category">Begrüßung &amp; Kennenlernen</span>
+              <span id="episodeLengthBadge" class="length-pill">Medium</span>
               <button id="openEpisodeListBtn" class="all-clips-link" type="button">All clips</button>
             </div>
             <h1 id="episodeTitle" class="episode-title">Hallo im Haus</h1>
@@ -156,6 +157,7 @@
                 <div class="subtab-group">
                   <button class="subtab-btn is-active" data-subtab="vocab" type="button">Vocabulary</button>
                   <button class="subtab-btn" data-subtab="grammar" type="button">Grammar Rules</button>
+                  <button class="subtab-btn" data-subtab="endings" type="button">Endings &amp; Closings</button>
                 </div>
                 <button id="startChapterListeningBtn" class="primary-action-btn" type="button">
                   Practice Kapitel 1 Voiceovers →
@@ -182,6 +184,11 @@
           <!-- Grammar Subview -->
           <div id="syllabusGrammarPanel" hidden>
             <div id="grammarCardsList" class="grammar-list"></div>
+          </div>
+
+          <!-- Endings & Spoken Closings Subview -->
+          <div id="syllabusEndingsPanel" hidden>
+            <div id="endingsContentList" class="grammar-list"></div>
           </div>
         </div>
       </section>
@@ -232,13 +239,14 @@
       <div class="sheet-inner">
         <header class="drawer-header">
           <div>
-            <p id="episodesDialogKicker" class="drawer-kicker">A1 · Kapitel 1</p>
-            <h2 id="episodesDialogTitle" class="drawer-title">Select Conversation</h2>
+            <p id="episodesDialogKicker" class="drawer-kicker">Choose Chapter &amp; Conversation</p>
+            <h2 id="episodesDialogTitle" class="drawer-title">Listening Library</h2>
           </div>
           <button id="closeEpisodesDialogBtn" class="drawer-close-btn" type="button" aria-label="Close list">
             ✕
           </button>
         </header>
+        <div id="modalChapterTabs" class="modal-chapter-bar"></div>
         <div id="episodesListBody" class="episodes-list-body"></div>
       </div>
     </dialog>
