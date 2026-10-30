@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hören — Structured German Listening</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <!-- Minimal Top Bar -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <button id="brandBtn" class="brand-mark" type="button" aria-label="Go to Listening Player">
+            Hören
+          </button>
+          <span class="topbar-divider" aria-hidden="true">/</span>
+          <button id="chapterPickerBtn" class="chapter-trigger" type="button">
+            <span id="currentChapterLabel">A1 · Kapitel 1</span>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+        </div>
+
+        <nav class="mode-nav" aria-label="Primary sections">
+          <button class="mode-tab is-active" data-mode="listen" type="button">Listen</button>
+          <button class="mode-tab" data-mode="syllabus" type="button">Chapter Prep</button>
+          <button class="mode-tab" data-mode="mixer" type="button">Combine</button>
+        </nav>
+
+        <div class="topbar-right">
+          <button id="coverageBtn" class="coverage-pill" type="button" title="View Chapter Vocabulary Progress">
+            <span id="coverageText">0 / 203 heard</span>
+          </button>
+          <button id="openWordsDrawerBtn" class="words-toggle-btn" type="button">
+            <span>Words</span>
+            <span id="clipWordsCount" class="count-chip">0</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- MAIN VIEW 1: Minimal Listening Player -->
+      <main id="listenView" class="view-container is-active">
+        <div class="listen-stage">
+          <!-- Topic filter strip + episode selector -->
+          <div class="stage-meta-bar">
+            <div id="categoryFilterBar" class="category-strip" role="tablist" aria-label="Conversation topics"></div>
+          </div>
+
+          <!-- Episode Header -->
+          <div class="episode-header">
+            <div class="episode-kicker-row">
+              <span id="episodeCounter" class="episode-counter">01 / 30</span>
+              <span class="dot-sep" aria-hidden="true">·</span>
+              <span id="episodeCategory" class="episode-category">Begrüßung & Kennenlernen</span>
+              <button id="openEpisodeListBtn" class="all-clips-link" type="button">All clips</button>
+            </div>
+            <h1 id="episodeTitle" class="episode-title">Hallo im Haus</h1>
+            <p id="episodeContext" class="episode-context">Two neighbors meet in the hallway for the first time.</p>
+          </div>
+
+          <!-- Flowing Interactive Transcript -->
+          <section id="transcriptContainer" class="transcript-flow" aria-label="Interactive German transcript"></section>
+        </div>
+
+        <!-- Minimal Bottom Audio Transport -->
+        <footer class="player-dock" aria-label="Audio controls">
+          <div class="player-dock-inner">
+            <div class="timeline-row">
+              <span id="timeCurrent" class="time-readout">0:00</span>
+              <input
+                id="seekSlider"
+                class="seek-slider"
+                type="range"
+                min="0"
+                max="1000"
+                value="0"
+                step="1"
+                aria-label="Seek audio position"
+              />
+              <span id="timeTotal" class="time-readout">0:00</span>
+            </div>
+
+            <div class="controls-row">
+              <div class="controls-secondary">
+                <button id="speedBtn" class="ghost-control" type="button" title="Playback speed">1.0×</button>
+                <button id="toggleEnBtn" class="ghost-control" type="button" aria-pressed="false" title="Toggle English translation">
+                  EN Off
+                </button>
+              </div>
+
+              <div class="controls-primary">
+                <button id="prevClipBtn" class="icon-control" type="button" aria-label="Previous conversation" title="Previous clip">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                    <path d="M19 20L9 12L19 4V20Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+                    <path d="M5 19V5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                  </svg>
+                </button>
+
+                <button id="rewindBtn" class="icon-control" type="button" aria-label="Rewind 4 seconds" title="Back 4 seconds">
+                  <span class="rewind-label">-4s</span>
+                </button>
+
+                <button id="playPauseBtn" class="play-btn" type="button" aria-label="Play or pause audio (Space)">
+                  <svg id="playIcon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M7 5.5V18.5L18 12L7 5.5Z" />
+                  </svg>
+                  <svg id="pauseIcon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" hidden>
+                    <rect x="6.5" y="5" width="3.8" height="14" rx="1" />
+                    <rect x="13.7" y="5" width="3.8" height="14" rx="1" />
+                  </svg>
+                </button>
+
+                <button id="nextClipBtn" class="icon-control" type="button" aria-label="Next conversation" title="Next clip">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                    <path d="M5 4L15 12L5 20V4Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+                    <path d="M19 5V19" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                  </svg>
+                </button>
+              </div>
+
+              <div class="controls-secondary controls-right">
+                <button id="bottomWordsBtn" class="ghost-control" type="button" title="Show words used in this clip">
+                  Clip Words
+                </button>
+              </div>
+            </div>
+          </div>
+        </footer>
+      </main>
+
+      <!-- MAIN VIEW 2: Chapter Prep (Complete Vocabulary + Grammar Syllabus) -->
+      <section id="syllabusView" class="view-container" hidden>
+        <div class="syllabus-page">
+          <div class="syllabus-hero">
+            <div class="syllabus-level-row">
+              <div class="level-Segment">
+                <button class="level-pill is-active" data-level="A1" type="button">Netzwerk A1</button>
+                <button class="level-pill" data-level="A2" type="button">Netzwerk A2</button>
+              </div>
+              <div id="syllabusChapterSelectRow" class="chapter-pills-row"></div>
+            </div>
+
+            <div class="syllabus-title-block">
+              <p id="syllabusThemeKicker" class="syllabus-kicker">Kapitel 1</p>
+              <h2 id="syllabusTitle" class="syllabus-heading">Guten Tag!</h2>
+              <p id="syllabusSubtitle" class="syllabus-subtitle"></p>
+              <div class="syllabus-actions-row">
+                <div class="subtab-group">
+                  <button class="subtab-btn is-active" data-subtab="vocab" type="button">Vocabulary</button>
+                  <button class="subtab-btn" data-subtab="grammar" type="button">Grammar Rules</button>
+                </div>
+                <button id="startChapterListeningBtn" class="primary-action-btn" type="button">
+                  Practice Kapitel 1 Voiceovers →
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Vocab Subview -->
+          <div id="syllabusVocabPanel">
+            <div class="vocab-toolbar">
+              <input
+                id="vocabSearchInput"
+                class="search-input"
+                type="search"
+                placeholder="Search German or English meaning..."
+                aria-label="Search chapter vocabulary"
+              />
+              <div id="posFilterRow" class="pos-filter-row"></div>
+            </div>
+            <div id="syllabusVocabList" class="vocab-grid"></div>
+          </div>
+
+          <!-- Grammar Subview -->
+          <div id="syllabusGrammarPanel" hidden>
+            <div id="grammarCardsList" class="grammar-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- MAIN VIEW 3: Combine Chapters (Mixer) -->
+      <section id="mixerView" class="view-container" hidden>
+        <div class="mixer-page">
+          <div class="mixer-header">
+            <p class="syllabus-kicker">Cross-Chapter Listening</p>
+            <h2 class="syllabus-heading">Combine Chapters</h2>
+            <p class="syllabus-subtitle">
+              Select two or more chapters to unlock conversations that blend only your chosen vocabulary and grammar—with zero out-of-syllabus words.
+            </p>
+          </div>
+
+          <div id="mixerCheckboxes" class="mixer-chapter-grid"></div>
+
+          <div class="mixer-results-section">
+            <div class="mixer-results-bar">
+              <h3 id="mixerResultsTitle" class="section-subheading">Combined Conversations</h3>
+              <span id="mixerResultsCount" class="muted-meta"></span>
+            </div>
+            <div id="mixerClipsGrid" class="clips-list-grid"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- HIDDEN-BY-DEFAULT SLIDE-OUT DRAWER: Words Used in Current Conversation -->
+    <dialog id="wordsDrawer" class="side-drawer" closedby="any" aria-labelledby="wordsDrawerTitle">
+      <div class="drawer-inner">
+        <header class="drawer-header">
+          <div>
+            <p class="drawer-kicker">In This Conversation</p>
+            <h2 id="wordsDrawerTitle" class="drawer-title">Vocabulary Used</h2>
+          </div>
+          <button id="closeWordsDrawerBtn" class="drawer-close-btn" type="button" aria-label="Close vocabulary sidebar">
+            ✕
+          </button>
+        </header>
+        <p class="drawer-hint">Grouped by part of speech. Spoken words highlight live while audio plays.</p>
+        <div id="drawerWordsContent" class="drawer-body"></div>
+      </div>
+    </dialog>
+
+    <!-- EPISODE / CHAPTER SELECTOR DIALOG -->
+    <dialog id="episodesDialog" class="modal-sheet" closedby="any" aria-labelledby="episodesDialogTitle">
+      <div class="sheet-inner">
+        <header class="drawer-header">
+          <div>
+            <p id="episodesDialogKicker" class="drawer-kicker">A1 · Kapitel 1</p>
+            <h2 id="episodesDialogTitle" class="drawer-title">Select Conversation</h2>
+          </div>
+          <button id="closeEpisodesDialogBtn" class="drawer-close-btn" type="button" aria-label="Close list">
+            ✕
+          </button>
+        </header>
+        <div id="episodesListBody" class="episodes-list-body"></div>
+      </div>
+    </dialog>
+
+    <!-- FLOATING WORD LOOKUP POPOVER (Tap-to-pause & inspect any word) -->
+    <div id="wordPopover" class="word-popover" popover="auto" role="dialog" aria-label="Word details">
+      <div id="wordPopoverBody"></div>
+    </div>
+
+    <audio id="audioPlayer" preload="metadata"></audio>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

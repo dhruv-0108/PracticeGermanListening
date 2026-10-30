@@ -1,0 +1,1016 @@
+import { NETZWERK_CHAPTERS } from "./data/netzwerkData.js";
+import { NETZWERK_A1_CHAPTER_VOCAB } from "./data/netzwerkChapterVocab.js";
+import { NETZWERK_A2_CHAPTER_VOCAB } from "./data/netzwerkA2ChapterVocab.js";
+import CONVERSATIONS from "./data/conversations/generatedConversations.json";
+
+// Feature-detect Popover API for older browsers
+if (!("popover" in HTMLElement.prototype)) {
+  import("@oddbird/popover-polyfill");
+}
+
+const AUDIO_BASE_URL = import.meta.env.VITE_AUDIO_BASE_URL || "/audio";
+const STORAGE_KEY = "horen_listening_progress_v1";
+const SPEEDS = [1.0, 0.85, 0.75, 1.15];
+
+const POS_LABELS = {
+  nouns: "Nouns",
+  verbs: "Verbs",
+  adjectives: "Adjectives",
+  adverbs: "Adverbs",
+  prepositions: "Prepositions",
+  phrases: "Phrases & Forms"
+};
+
+const POS_SINGULAR = {
+  nouns: "Noun",
+  verbs: "Verb",
+  adjectives: "Adjective",
+  adverbs: "Adverb",
+  prepositions: "Preposition",
+  phrases: "Phrase"
+};
+
+// ─── Build Global Vocab Map ───
+function cleanVocabGerman(raw) {
+  let g = (raw || "").trim();
+  if (g.startsWith("sie (")) return "sie";
+  if (g === "einbisschen") return "ein bisschen";
+  return g;
+}
+
+const GLOBAL_VOCAB_MAP = new Map();
+const CHAPTER_NORMALIZED_VOCAB = { A1: {}, A2: {} };
+
+function indexLevelVocab(levelKey, rawSource) {
+  for (const [chId, chObj] of Object.entries(rawSource)) {
+    const list = [];
+    const seen = new Set();
+    for (const [category, arr] of Object.entries(chObj)) {
+      for (const item of arr) {
+        const displayGerman = cleanVocabGerman(item.german);
+        const dedupKey = `${category}:${displayGerman.toLowerCase()}`;
+        const fullKey = `${chId}:${dedupKey}`;
+        const normalized = {
+          key: fullKey,
+          rawIndexKey: `${levelKey}:${fullKey}`,
+          level: levelKey,
+          chapter: chId,
+          category,
+          german: displayGerman,
+          article: item.article && item.article !== "—" ? item.article : null,
+          plural: item.plural || null,
+          english: item.english || "",
+          subType: item.subType || null,
+          exampleA1: item.exampleA1 || "",
+          exampleEn: item.exampleEn || ""
+        };
+        if (levelKey === "A1" && !GLOBAL_VOCAB_MAP.has(fullKey)) {
+          GLOBAL_VOCAB_MAP.set(fullKey, normalized);
+        }
+        if (!seen.has(dedupKey)) {
+          seen.add(dedupKey);
+          list.push(normalized);
+        }
+      }
+    }
+    CHAPTER_NORMALIZED_VOCAB[levelKey][chId] = list;
+  }
+}
+
+indexLevelVocab("A1", NETZWERK_A1_CHAPTER_VOCAB);
+indexLevelVocab("A2", NETZWERK_A2_CHAPTER_VOCAB);
+
+// Also index any usedVocab from conversations directly
+for (const conv of CONVERSATIONS) {
+  for (const v of conv.usedVocab || []) {
+    if (!GLOBAL_VOCAB_MAP.has(v.key)) {
+      GLOBAL_VOCAB_MAP.set(v.key, v);
+    }
+  }
+}
+
+// ─── Persistent Local Progress ───
+function loadProgress() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { heardKeys: {}, completedClips: {}, lastClipId: "kap1-01" };
+    const parsed = JSON.parse(raw);
+    return {
+      heardKeys: parsed.heardKeys || {},
+      completedClips: parsed.completedClips || {},
+      lastClipId: parsed.lastClipId || "kap1-01"
+    };
+  } catch {
+    return { heardKeys: {}, completedClips: {}, lastClipId: "kap1-01" };
+  }
+}
+
+const progress = loadProgress();
+let saveTimer = null;
+function scheduleSave() {
+  if (saveTimer) return;
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+    } catch {
+      // ignore storage quota errors
+    }
+  }, 400);
+}
+
+// ─── Application State ───
+const state = {
+  mode: "listen", // 'listen' | 'syllabus' | 'mixer'
+  activeCategory: "All",
+  playlist: CONVERSATIONS.filter(c => !c.isMix),
+  currentClip: CONVERSATIONS.find(c => c.id === progress.lastClipId) || CONVERSATIONS[0],
+  showEnglish: false,
+  speedIndex: 0,
+  wasPlayingBeforeLookup: false,
+
+  // Syllabus state
+  syllabusLevel: "A1",
+  syllabusChapter: "kap-1",
+  syllabusSubtab: "vocab",
+  vocabSearch: "",
+  vocabPosFilter: "all",
+
+  // Mixer state
+  mixerSelected: new Set(["kap-1", "kap-2"])
+};
+
+// ─── DOM Elements ───
+const audio = document.getElementById("audioPlayer");
+const listenView = document.getElementById("listenView");
+const syllabusView = document.getElementById("syllabusView");
+const mixerView = document.getElementById("mixerView");
+
+const currentChapterLabel = document.getElementById("currentChapterLabel");
+const coverageText = document.getElementById("coverageText");
+const clipWordsCount = document.getElementById("clipWordsCount");
+
+const categoryFilterBar = document.getElementById("categoryFilterBar");
+const episodeCounter = document.getElementById("episodeCounter");
+const episodeCategory = document.getElementById("episodeCategory");
+const episodeTitle = document.getElementById("episodeTitle");
+const episodeContext = document.getElementById("episodeContext");
+const transcriptContainer = document.getElementById("transcriptContainer");
+
+const seekSlider = document.getElementById("seekSlider");
+const timeCurrent = document.getElementById("timeCurrent");
+const timeTotal = document.getElementById("timeTotal");
+const playPauseBtn = document.getElementById("playPauseBtn");
+const playIcon = document.getElementById("playIcon");
+const pauseIcon = document.getElementById("pauseIcon");
+const speedBtn = document.getElementById("speedBtn");
+const toggleEnBtn = document.getElementById("toggleEnBtn");
+
+const wordsDrawer = document.getElementById("wordsDrawer");
+const drawerWordsContent = document.getElementById("drawerWordsContent");
+const episodesDialog = document.getElementById("episodesDialog");
+const episodesListBody = document.getElementById("episodesListBody");
+const wordPopover = document.getElementById("wordPopover");
+const wordPopoverBody = document.getElementById("wordPopoverBody");
+
+// ─── Top-Layer Animation & Light-Dismiss Helpers ───
+let supportsDisplayTransition;
+function canTransitionDisplay() {
+  if (supportsDisplayTransition !== undefined) return supportsDisplayTransition;
+  if (!window.CSS?.supports?.("transition-behavior", "allow-discrete") || !document.body) {
+    return false;
+  }
+  const probe = document.createElement("div");
+  probe.style.cssText = "transition: display 1s allow-discrete !important; display: block;";
+  document.body.appendChild(probe);
+  getComputedStyle(probe).display;
+  probe.style.display = "none";
+  supportsDisplayTransition = getComputedStyle(probe).display === "block";
+  probe.remove();
+  return supportsDisplayTransition;
+}
+
+function supportsTopLayerExit() {
+  return window.CSS?.supports?.("overlay", "auto") && canTransitionDisplay();
+}
+
+async function closeDialogSmoothly(dialog) {
+  if (!dialog.open) return;
+  if (!supportsTopLayerExit()) {
+    dialog.setAttribute("data-closing", "");
+    const animations = dialog.getAnimations({ subtree: true });
+    if (animations.length > 0) {
+      await Promise.race([
+        Promise.allSettled(animations.map(a => a.finished)),
+        new Promise(r => setTimeout(r, 400))
+      ]);
+    }
+    if (!dialog.hasAttribute("data-closing")) return;
+    dialog.removeAttribute("data-closing");
+  }
+  dialog.close();
+}
+
+function wireDialogBehavior(dialog) {
+  dialog.addEventListener("cancel", event => {
+    event.preventDefault();
+    closeDialogSmoothly(dialog);
+  });
+
+  if (!("closedBy" in HTMLDialogElement.prototype)) {
+    dialog.addEventListener("click", event => {
+      if (event.target !== dialog) return;
+      const rect = dialog.getBoundingClientRect();
+      const inside =
+        rect.top <= event.clientY &&
+        event.clientY <= rect.top + rect.height &&
+        rect.left <= event.clientX &&
+        event.clientX <= rect.left + rect.width;
+      if (!inside) closeDialogSmoothly(dialog);
+    });
+  }
+}
+
+wireDialogBehavior(wordsDrawer);
+wireDialogBehavior(episodesDialog);
+
+// ─── Formatting Helpers ───
+function formatTime(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "0:00";
+  const totalSec = Math.floor(ms / 1000);
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
+function escapeHtml(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function articleBadgeHtml(article) {
+  if (!article || article === "—") return "";
+  const clean = article.toLowerCase();
+  const cls = clean === "der" ? "art-der" : clean === "die" ? "art-die" : clean === "das" ? "art-das" : "";
+  return `<span class="${cls}">${escapeHtml(article)}</span> `;
+}
+
+function pronounceSingleWord(text) {
+  if (!("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = "de-DE";
+  utter.rate = 0.92;
+  window.speechSynthesis.speak(utter);
+}
+
+// ─── Update Coverage Pill ───
+function updateCoverageBadge() {
+  const kap1Total = (CHAPTER_NORMALIZED_VOCAB.A1["kap-1"] || []).length;
+  let heard = 0;
+  for (const item of CHAPTER_NORMALIZED_VOCAB.A1["kap-1"] || []) {
+    if (progress.heardKeys[item.key]) heard++;
+  }
+  coverageText.textContent = `${heard} / ${kap1Total} heard`;
+}
+
+// ─── Switch Top-Level Views ───
+function setMode(mode) {
+  state.mode = mode;
+  document.querySelectorAll(".mode-tab").forEach(btn => {
+    btn.classList.toggle("is-active", btn.dataset.mode === mode);
+  });
+
+  listenView.hidden = mode !== "listen";
+  syllabusView.hidden = mode !== "syllabus";
+  mixerView.hidden = mode !== "mixer";
+
+  if (mode === "syllabus") {
+    renderSyllabusView();
+  } else if (mode === "mixer") {
+    renderMixerView();
+  }
+}
+
+// ─── Render Category Strip & Load Conversation ───
+function rebuildPlaylistForCategory(category) {
+  state.activeCategory = category;
+  const singleClips = CONVERSATIONS.filter(c => !c.isMix);
+  if (category === "All") {
+    state.playlist = singleClips;
+  } else {
+    state.playlist = singleClips.filter(c => c.category === category);
+  }
+  renderCategoryStrip();
+}
+
+function renderCategoryStrip() {
+  const singleClips = CONVERSATIONS.filter(c => !c.isMix);
+  const categories = ["All", ...new Set(singleClips.map(c => c.category))];
+
+  categoryFilterBar.innerHTML = categories
+    .map(cat => {
+      const active = state.activeCategory === cat && !state.currentClip.isMix ? "is-active" : "";
+      const label = cat === "All" ? `All (${singleClips.length})` : cat;
+      return `<button class="cat-pill ${active}" type="button" data-cat="${escapeHtml(cat)}">${escapeHtml(label)}</button>`;
+    })
+    .join("");
+
+  categoryFilterBar.querySelectorAll(".cat-pill").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const cat = btn.dataset.cat;
+      rebuildPlaylistForCategory(cat);
+      if (state.playlist.length > 0 && !state.playlist.some(c => c.id === state.currentClip.id)) {
+        loadConversation(state.playlist[0], false);
+      }
+    });
+  });
+}
+
+let domTokenRefs = [];
+let domLineRefs = [];
+
+function loadConversation(conv, autoplay = false) {
+  state.currentClip = conv;
+  progress.lastClipId = conv.id;
+  scheduleSave();
+
+  if (conv.isMix) {
+    const chNums = conv.chapters.map(c => c.replace("kap-", "")).join(" + ");
+    currentChapterLabel.textContent = `A1 · Mix (${chNums})`;
+  } else {
+    currentChapterLabel.textContent = `A1 · Kapitel ${conv.chapters[0].replace("kap-", "")}`;
+  }
+
+  const idxInList = state.playlist.findIndex(c => c.id === conv.id);
+  const posText =
+    idxInList >= 0
+      ? `${String(idxInList + 1).padStart(2, "0")} / ${String(state.playlist.length).padStart(2, "0")}`
+      : "Mix";
+
+  episodeCounter.textContent = posText;
+  episodeCategory.textContent = conv.category;
+  episodeTitle.textContent = conv.title;
+  episodeContext.textContent = conv.context;
+  clipWordsCount.textContent = String((conv.usedVocab || []).length);
+
+  renderCategoryStrip();
+  renderTranscript(conv);
+  renderWordsDrawer(conv);
+
+  audio.src = `${AUDIO_BASE_URL}/${conv.audioFile}`;
+  audio.playbackRate = SPEEDS[state.speedIndex];
+  seekSlider.value = "0";
+  timeCurrent.textContent = "0:00";
+  timeTotal.textContent = formatTime(conv.durationMs);
+  transcriptContainer.classList.add("is-idle");
+
+  if (autoplay) {
+    audio.play().catch(() => {});
+  } else {
+    updatePlayPauseIcons(true);
+  }
+}
+
+function renderTranscript(conv) {
+  domTokenRefs = [];
+  domLineRefs = [];
+  transcriptContainer.innerHTML = "";
+
+  conv.lines.forEach((line, lineIdx) => {
+    const row = document.createElement("article");
+    row.className = "utterance-row";
+
+    const speakerMeta = document.createElement("div");
+    speakerMeta.className = "speaker-tag";
+    speakerMeta.innerHTML = `<span>${escapeHtml(line.speakerName)}</span><span class="speaker-region">${escapeHtml(line.voiceLabel || "")}</span>`;
+
+    const pDe = document.createElement("p");
+    pDe.className = "utterance-de";
+
+    line.tokens.forEach((tok, tokIdx) => {
+      const span = document.createElement("span");
+      span.className = "word-token";
+      span.textContent = tok.text;
+      span.tabIndex = 0;
+      span.addEventListener("click", e => {
+        e.stopPropagation();
+        handleWordClick(span, tok, line);
+      });
+      span.addEventListener("keydown", e => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          handleWordClick(span, tok, line);
+        }
+      });
+
+      pDe.appendChild(span);
+      if (tokIdx < line.tokens.length - 1) {
+        pDe.appendChild(document.createTextNode(" "));
+      }
+
+      domTokenRefs.push({
+        el: span,
+        startMs: tok.startMs,
+        endMs: tok.endMs,
+        vocabKey: tok.vocabKey,
+        lineIdx
+      });
+    });
+
+    const pEn = document.createElement("p");
+    pEn.className = "utterance-en";
+    pEn.textContent = line.en;
+    pEn.hidden = !state.showEnglish;
+
+    row.append(speakerMeta, pDe, pEn);
+    transcriptContainer.appendChild(row);
+    domLineRefs.push({ el: row, startMs: line.startMs, endMs: line.endMs, enEl: pEn });
+  });
+}
+
+// ─── Render Right-Side Words Drawer (Hidden by default until opened) ───
+function renderWordsDrawer(conv) {
+  const grouped = {};
+  for (const pos of Object.keys(POS_LABELS)) grouped[pos] = [];
+
+  for (const item of conv.usedVocab || []) {
+    if (!grouped[item.category]) grouped[item.category] = [];
+    grouped[item.category].push(item);
+  }
+
+  let html = "";
+  for (const [pos, label] of Object.entries(POS_LABELS)) {
+    const items = grouped[pos];
+    if (!items || items.length === 0) continue;
+
+    html += `<section class="pos-section">
+      <h3 class="pos-section-title"><span>${escapeHtml(label)}</span><span>${items.length}</span></h3>
+      <div class="drawer-word-list">
+        ${items
+          .map(w => {
+            const art = w.category === "nouns" ? articleBadgeHtml(w.article) : "";
+            const pl =
+              w.category === "nouns" && w.plural && w.plural !== "— (Sg.)"
+                ? ` <span class="muted-meta">· ${escapeHtml(w.plural)}</span>`
+                : "";
+            return `<div class="drawer-word-item" data-vkey="${escapeHtml(w.key)}">
+              <span class="dw-de">${art}${escapeHtml(w.german)}${pl}</span>
+              <span class="dw-en">${escapeHtml(w.english)}</span>
+            </div>`;
+          })
+          .join("")}
+      </div>
+    </section>`;
+  }
+
+  drawerWordsContent.innerHTML = html || `<p class="muted-meta">No tagged vocabulary in this clip.</p>`;
+}
+
+// ─── Tap Any Word -> Pause & Show Popover ───
+function handleWordClick(targetEl, tok, line) {
+  state.wasPlayingBeforeLookup = !audio.paused;
+  if (!audio.paused) {
+    audio.pause();
+  }
+
+  const entry = tok.vocabKey ? GLOBAL_VOCAB_MAP.get(tok.vocabKey) : null;
+  const cleanSurface = tok.text.replace(/^[^a-zA-ZäöüÄÖÜß0-9-]+|[^a-zA-ZäöüÄÖÜß0-9-]+$/g, "");
+
+  if (entry) {
+    const chDisplay = `A1 · Kap. ${entry.chapter.replace("kap-", "")}`;
+    const posName = POS_SINGULAR[entry.category] || entry.category;
+    const headHtml =
+      entry.category === "nouns"
+        ? `${articleBadgeHtml(entry.article)}${escapeHtml(entry.german)}`
+        : escapeHtml(entry.german);
+
+    let subform = `Spoken in line: “${escapeHtml(cleanSurface)}”`;
+    if (entry.category === "nouns" && entry.plural) {
+      subform = `Plural: ${escapeHtml(entry.plural)}`;
+    } else if (entry.category === "verbs" && entry.subType) {
+      subform = `Verb (${escapeHtml(entry.subType)}) · spoken as “${escapeHtml(cleanSurface)}”`;
+    }
+
+    wordPopoverBody.innerHTML = `
+      <div class="wp-meta">
+        <span>${escapeHtml(posName)}</span>
+        <span>${escapeHtml(chDisplay)}</span>
+      </div>
+      <h3 class="wp-headword">${headHtml}</h3>
+      <p class="wp-subform">${subform}</p>
+      <p class="wp-meaning">${escapeHtml(entry.english)}</p>
+      ${
+        entry.exampleA1
+          ? `<p class="wp-example">“${escapeHtml(entry.exampleA1)}”<br/><span class="muted-meta">${escapeHtml(entry.exampleEn)}</span></p>`
+          : ""
+      }
+      <div class="wp-actions">
+        <button id="wpSpeakBtn" class="wp-btn" type="button">Pronounce</button>
+        <button id="wpResumeBtn" class="wp-btn wp-btn-primary" type="button">Resume ▸</button>
+      </div>
+    `;
+
+    document.getElementById("wpSpeakBtn")?.addEventListener("click", () => {
+      const speakText = entry.article ? `${entry.article} ${entry.german}` : entry.german;
+      pronounceSingleWord(speakText);
+    });
+  } else {
+    wordPopoverBody.innerHTML = `
+      <div class="wp-meta">
+        <span>Name / Context</span>
+        <span>Line Meaning</span>
+      </div>
+      <h3 class="wp-headword">${escapeHtml(cleanSurface || tok.text)}</h3>
+      <p class="wp-meaning">${escapeHtml(line.en)}</p>
+      <div class="wp-actions">
+        <button id="wpSpeakBtn" class="wp-btn" type="button">Pronounce</button>
+        <button id="wpResumeBtn" class="wp-btn wp-btn-primary" type="button">Resume ▸</button>
+      </div>
+    `;
+    document.getElementById("wpSpeakBtn")?.addEventListener("click", () => {
+      pronounceSingleWord(cleanSurface || tok.text);
+    });
+  }
+
+  document.getElementById("wpResumeBtn")?.addEventListener("click", () => {
+    wordPopover.hidePopover?.();
+    audio.play().catch(() => {});
+  });
+
+  wordPopover.showPopover?.();
+
+  // Position cleanly near clicked word, clamped inside viewport
+  const rect = targetEl.getBoundingClientRect();
+  const popWidth = Math.min(320, window.innerWidth - 32);
+  let left = rect.left + rect.width / 2 - popWidth / 2;
+  left = Math.max(16, Math.min(left, window.innerWidth - popWidth - 16));
+
+  let top = rect.bottom + 10;
+  if (top + 230 > window.innerHeight) {
+    top = Math.max(16, rect.top - 220);
+  }
+  wordPopover.style.left = `${Math.round(left)}px`;
+  wordPopover.style.top = `${Math.round(top)}px`;
+}
+
+// ─── Audio Playback & Live Word Sync Loop ───
+let rafId = null;
+let lastActiveLineIdx = -1;
+
+function syncTranscriptToTime() {
+  const nowMs = audio.currentTime * 1000;
+  const durMs = Number.isFinite(audio.duration) ? audio.duration * 1000 : state.currentClip.durationMs;
+
+  timeCurrent.textContent = formatTime(nowMs);
+  if (durMs > 0) {
+    timeTotal.textContent = formatTime(durMs);
+    seekSlider.value = String(Math.min(1000, Math.round((nowMs / durMs) * 1000)));
+  }
+
+  let activeLineIdx = -1;
+  for (let i = 0; i < domLineRefs.length; i++) {
+    const l = domLineRefs[i];
+    const isCurrent = nowMs >= l.startMs && nowMs <= l.endMs + 220;
+    l.el.classList.toggle("is-active", isCurrent);
+    if (isCurrent) activeLineIdx = i;
+  }
+
+  if (activeLineIdx !== -1 && activeLineIdx !== lastActiveLineIdx) {
+    lastActiveLineIdx = activeLineIdx;
+    domLineRefs[activeLineIdx].el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  const activeVocabKeys = new Set();
+  let heardUpdated = false;
+
+  for (const t of domTokenRefs) {
+    const speaking = nowMs >= t.startMs && nowMs <= t.endMs;
+    t.el.classList.toggle("is-speaking", speaking);
+    if (speaking && t.vocabKey) {
+      activeVocabKeys.add(t.vocabKey);
+      if (!progress.heardKeys[t.vocabKey]) {
+        progress.heardKeys[t.vocabKey] = true;
+        heardUpdated = true;
+      }
+    }
+  }
+
+  if (heardUpdated) {
+    updateCoverageBadge();
+    scheduleSave();
+  }
+
+  if (wordsDrawer.open) {
+    wordsDrawer.querySelectorAll(".drawer-word-item").forEach(el => {
+      el.classList.toggle("is-live", activeVocabKeys.has(el.dataset.vkey));
+    });
+  }
+
+  if (!audio.paused) {
+    rafId = requestAnimationFrame(syncTranscriptToTime);
+  }
+}
+
+function updatePlayPauseIcons(isPaused) {
+  playIcon.hidden = !isPaused;
+  pauseIcon.hidden = isPaused;
+}
+
+audio.addEventListener("play", () => {
+  transcriptContainer.classList.remove("is-idle");
+  updatePlayPauseIcons(false);
+  wordPopover.hidePopover?.();
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(syncTranscriptToTime);
+});
+
+audio.addEventListener("pause", () => {
+  updatePlayPauseIcons(true);
+  cancelAnimationFrame(rafId);
+  syncTranscriptToTime();
+});
+
+audio.addEventListener("ended", () => {
+  updatePlayPauseIcons(true);
+  cancelAnimationFrame(rafId);
+  transcriptContainer.classList.add("is-idle");
+  domTokenRefs.forEach(t => t.el.classList.remove("is-speaking"));
+  domLineRefs.forEach(l => l.el.classList.remove("is-active"));
+  lastActiveLineIdx = -1;
+  progress.completedClips[state.currentClip.id] = true;
+  scheduleSave();
+});
+
+audio.addEventListener("loadedmetadata", () => {
+  if (Number.isFinite(audio.duration)) {
+    timeTotal.textContent = formatTime(audio.duration * 1000);
+  }
+});
+
+// ─── Transport Controls ───
+playPauseBtn.addEventListener("click", () => {
+  if (audio.paused) {
+    audio.play().catch(() => {});
+  } else {
+    audio.pause();
+  }
+});
+
+seekSlider.addEventListener("input", () => {
+  const durSec = Number.isFinite(audio.duration) ? audio.duration : state.currentClip.durationMs / 1000;
+  if (durSec > 0) {
+    audio.currentTime = (Number(seekSlider.value) / 1000) * durSec;
+    syncTranscriptToTime();
+  }
+});
+
+document.getElementById("rewindBtn").addEventListener("click", () => {
+  audio.currentTime = Math.max(0, audio.currentTime - 4);
+  syncTranscriptToTime();
+});
+
+document.getElementById("prevClipBtn").addEventListener("click", () => {
+  const idx = state.playlist.findIndex(c => c.id === state.currentClip.id);
+  if (idx > 0) {
+    loadConversation(state.playlist[idx - 1], true);
+  } else if (state.playlist.length > 0) {
+    loadConversation(state.playlist[state.playlist.length - 1], true);
+  }
+});
+
+document.getElementById("nextClipBtn").addEventListener("click", () => {
+  const idx = state.playlist.findIndex(c => c.id === state.currentClip.id);
+  if (idx >= 0 && idx < state.playlist.length - 1) {
+    loadConversation(state.playlist[idx + 1], true);
+  } else if (state.playlist.length > 0) {
+    loadConversation(state.playlist[0], true);
+  }
+});
+
+speedBtn.addEventListener("click", () => {
+  state.speedIndex = (state.speedIndex + 1) % SPEEDS.length;
+  const rate = SPEEDS[state.speedIndex];
+  audio.playbackRate = rate;
+  speedBtn.textContent = `${rate.toFixed(rate === 1 || rate === 1.0 ? 1 : 2)}×`;
+});
+
+toggleEnBtn.addEventListener("click", () => {
+  state.showEnglish = !state.showEnglish;
+  toggleEnBtn.setAttribute("aria-pressed", String(state.showEnglish));
+  toggleEnBtn.textContent = state.showEnglish ? "EN On" : "EN Off";
+  domLineRefs.forEach(l => {
+    l.enEl.hidden = !state.showEnglish;
+  });
+});
+
+// Spacebar shortcut to play/pause when not typing in search input
+document.addEventListener("keydown", e => {
+  if (e.code === "Space" && state.mode === "listen") {
+    const tag = document.activeElement?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "BUTTON") return;
+    e.preventDefault();
+    if (audio.paused) audio.play().catch(() => {});
+    else audio.pause();
+  }
+});
+
+// ─── Drawers & Modals Wiring ───
+function openWordsDrawer() {
+  if (!wordsDrawer.open) wordsDrawer.showModal();
+}
+
+document.getElementById("openWordsDrawerBtn").addEventListener("click", openWordsDrawer);
+document.getElementById("bottomWordsBtn").addEventListener("click", openWordsDrawer);
+document.getElementById("closeWordsDrawerBtn").addEventListener("click", () => closeDialogSmoothly(wordsDrawer));
+
+function openEpisodesModal() {
+  episodesListBody.innerHTML = state.playlist
+    .map((c, idx) => {
+      const done = progress.completedClips[c.id] ? " · ✓" : "";
+      const curr = c.id === state.currentClip.id ? "is-current" : "";
+      return `<button class="episode-pick-row ${curr}" type="button" data-cid="${escapeHtml(c.id)}">
+        <span class="ep-row-left">
+          <span class="ep-row-num">${String(idx + 1).padStart(2, "0")}</span>
+          <span class="ep-row-title">${escapeHtml(c.title)}${done}</span>
+        </span>
+        <span class="ep-row-cat">${escapeHtml(c.category)}</span>
+      </button>`;
+    })
+    .join("");
+
+  episodesListBody.querySelectorAll(".episode-pick-row").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const found = CONVERSATIONS.find(c => c.id === btn.dataset.cid);
+      if (found) {
+        setMode("listen");
+        loadConversation(found, true);
+        closeDialogSmoothly(episodesDialog);
+      }
+    });
+  });
+
+  if (!episodesDialog.open) episodesDialog.showModal();
+}
+
+document.getElementById("openEpisodeListBtn").addEventListener("click", openEpisodesModal);
+document.getElementById("chapterPickerBtn").addEventListener("click", openEpisodesModal);
+document.getElementById("closeEpisodesDialogBtn").addEventListener("click", () => closeDialogSmoothly(episodesDialog));
+
+document.getElementById("brandBtn").addEventListener("click", () => setMode("listen"));
+document.getElementById("coverageBtn").addEventListener("click", () => {
+  state.syllabusLevel = "A1";
+  state.syllabusChapter = "kap-1";
+  state.syllabusSubtab = "vocab";
+  setMode("syllabus");
+});
+
+document.querySelectorAll(".mode-tab").forEach(btn => {
+  btn.addEventListener("click", () => setMode(btn.dataset.mode));
+});
+
+// ─── VIEW 2: Chapter Prep (Complete Vocabulary + Grammar Syllabus) ───
+function renderSyllabusView() {
+  const chapters = NETZWERK_CHAPTERS[state.syllabusLevel] || [];
+  const chMeta = chapters.find(c => c.id === state.syllabusChapter) || chapters[0];
+
+  document.querySelectorAll(".level-pill").forEach(btn => {
+    btn.classList.toggle("is-active", btn.dataset.level === state.syllabusLevel);
+  });
+
+  const chRow = document.getElementById("syllabusChapterSelectRow");
+  chRow.innerHTML = chapters
+    .map(c => {
+      const active = c.id === chMeta.id ? "is-active" : "";
+      return `<button class="ch-num-pill ${active}" type="button" data-chid="${c.id}">Kap. ${c.number}</button>`;
+    })
+    .join("");
+
+  chRow.querySelectorAll(".ch-num-pill").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.syllabusChapter = btn.dataset.chid;
+      renderSyllabusView();
+    });
+  });
+
+  document.getElementById("syllabusThemeKicker").textContent = `${state.syllabusLevel} · Kapitel ${chMeta.number}`;
+  document.getElementById("syllabusTitle").textContent = chMeta.title;
+  document.getElementById("syllabusSubtitle").textContent = chMeta.theme;
+
+  const listenBtn = document.getElementById("startChapterListeningBtn");
+  const hasVoiceovers = state.syllabusLevel === "A1" && chMeta.id === "kap-1";
+  listenBtn.textContent = hasVoiceovers
+    ? `Practice Kapitel ${chMeta.number} Voiceovers (30) →`
+    : `Kapitel 1 Voiceovers Ready · Play Now →`;
+
+  document.querySelectorAll(".subtab-btn").forEach(btn => {
+    btn.classList.toggle("is-active", btn.dataset.subtab === state.syllabusSubtab);
+  });
+
+  const vocabPanel = document.getElementById("syllabusVocabPanel");
+  const grammarPanel = document.getElementById("syllabusGrammarPanel");
+  vocabPanel.hidden = state.syllabusSubtab !== "vocab";
+  grammarPanel.hidden = state.syllabusSubtab !== "grammar";
+
+  if (state.syllabusSubtab === "vocab") {
+    renderSyllabusVocab(chMeta.id);
+  } else {
+    renderSyllabusGrammar(chMeta);
+  }
+}
+
+function renderSyllabusVocab(chId) {
+  const allWords = CHAPTER_NORMALIZED_VOCAB[state.syllabusLevel]?.[chId] || [];
+  const posFilterRow = document.getElementById("posFilterRow");
+
+  const posCounts = { all: allWords.length };
+  for (const w of allWords) {
+    posCounts[w.category] = (posCounts[w.category] || 0) + 1;
+  }
+
+  const tabs = [
+    ["all", `All (${allWords.length})`],
+    ...Object.entries(POS_LABELS)
+      .filter(([k]) => posCounts[k])
+      .map(([k, label]) => [k, `${label} (${posCounts[k]})`])
+  ];
+
+  posFilterRow.innerHTML = tabs
+    .map(([key, label]) => {
+      const active = state.vocabPosFilter === key ? "is-active" : "";
+      return `<button class="cat-pill ${active}" type="button" data-pos="${key}">${escapeHtml(label)}</button>`;
+    })
+    .join("");
+
+  posFilterRow.querySelectorAll(".cat-pill").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.vocabPosFilter = btn.dataset.pos;
+      renderSyllabusVocab(chId);
+    });
+  });
+
+  const q = state.vocabSearch.trim().toLowerCase();
+  const filtered = allWords.filter(w => {
+    if (state.vocabPosFilter !== "all" && w.category !== state.vocabPosFilter) return false;
+    if (!q) return true;
+    return w.german.toLowerCase().includes(q) || w.english.toLowerCase().includes(q);
+  });
+
+  const grid = document.getElementById("syllabusVocabList");
+  grid.innerHTML = filtered
+    .map((w, idx) => {
+      // Only defer off-screen items below initial fold (index >= 12)
+      const deferCls = idx >= 12 ? "vocab-card-deferred" : "";
+      const heard = state.syllabusLevel === "A1" && progress.heardKeys[w.key];
+      const art = w.category === "nouns" ? articleBadgeHtml(w.article) : "";
+      const pl =
+        w.category === "nouns" && w.plural && w.plural !== "— (Sg.)"
+          ? `<div class="muted-meta" style="font-size:0.76rem">Pl: ${escapeHtml(w.plural)}</div>`
+          : "";
+
+      return `<article class="vocab-card ${deferCls}" data-speak="${escapeHtml(
+        w.article ? `${w.article} ${w.german}` : w.german
+      )}" title="Click to hear pronunciation">
+        <div>
+          <div class="vc-top">
+            <span class="vc-word">${art}${escapeHtml(w.german)}</span>
+            ${heard ? `<span class="vc-heard-dot">Heard</span>` : `<span class="muted-meta" style="font-size:0.72rem">${escapeHtml(POS_SINGULAR[w.category])}</span>`}
+          </div>
+          ${pl}
+          <div class="vc-en">${escapeHtml(w.english)}</div>
+        </div>
+        ${w.exampleA1 ? `<div class="vc-ex">${escapeHtml(w.exampleA1)}</div>` : ""}
+      </article>`;
+    })
+    .join("");
+
+  grid.querySelectorAll(".vocab-card").forEach(card => {
+    card.style.cursor = "pointer";
+    card.addEventListener("click", () => pronounceSingleWord(card.dataset.speak));
+  });
+}
+
+function renderSyllabusGrammar(chMeta) {
+  const listEl = document.getElementById("grammarCardsList");
+  listEl.innerHTML = (chMeta.grammarTopics || [])
+    .map(
+      g => `<article class="grammar-card">
+      <h3 class="gc-title">${escapeHtml(g.title)}</h3>
+      <p class="gc-rule">${escapeHtml(g.rule)}</p>
+      <div class="gc-pattern">${escapeHtml(g.pattern)}</div>
+      <div class="gc-examples">
+        ${(g.examples || [])
+          .map(
+            ex =>
+              `<div><strong>${escapeHtml(ex.de)}</strong> — <span class="muted-meta">${escapeHtml(ex.en)}</span></div>`
+          )
+          .join("")}
+      </div>
+    </article>`
+    )
+    .join("");
+}
+
+document.querySelectorAll(".level-pill").forEach(btn => {
+  btn.addEventListener("click", () => {
+    state.syllabusLevel = btn.dataset.level;
+    state.syllabusChapter = "kap-1";
+    renderSyllabusView();
+  });
+});
+
+document.querySelectorAll(".subtab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    state.syllabusSubtab = btn.dataset.subtab;
+    renderSyllabusView();
+  });
+});
+
+document.getElementById("vocabSearchInput").addEventListener("input", e => {
+  state.vocabSearch = e.target.value;
+  renderSyllabusVocab(state.syllabusChapter);
+});
+
+document.getElementById("startChapterListeningBtn").addEventListener("click", () => {
+  rebuildPlaylistForCategory("All");
+  loadConversation(state.playlist[0], false);
+  setMode("listen");
+});
+
+// ─── VIEW 3: Combine Chapters (Mixer) ───
+function renderMixerView() {
+  const activeMixChapters = new Set(["kap-1", "kap-2", "kap-3"]);
+  const boxGrid = document.getElementById("mixerCheckboxes");
+
+  boxGrid.innerHTML = NETZWERK_CHAPTERS.A1.map(ch => {
+    const ready = activeMixChapters.has(ch.id);
+    const selected = state.mixerSelected.has(ch.id);
+    return `<button class="mixer-check-card ${selected ? "is-selected" : ""} ${ready ? "" : "is-soon"}" type="button" data-mch="${ch.id}" ${
+      ready ? "" : "disabled"
+    }>
+      <div class="mc-top">
+        <span>Kapitel ${ch.number}</span>
+        <span>${ready ? (selected ? "Selected ✓" : "Select") : "Audio Soon"}</span>
+      </div>
+      <div class="mc-title">${escapeHtml(ch.title)}</div>
+    </button>`;
+  }).join("");
+
+  boxGrid.querySelectorAll(".mixer-check-card:not([disabled])").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.mch;
+      if (state.mixerSelected.has(id) && state.mixerSelected.size > 1) {
+        state.mixerSelected.delete(id);
+      } else {
+        state.mixerSelected.add(id);
+      }
+      renderMixerView();
+    });
+  });
+
+  // Unlock every conversation whose required chapters are a subset of state.mixerSelected
+  const eligibleMixes = CONVERSATIONS.filter(
+    c => c.isMix && c.chapters.every(ch => state.mixerSelected.has(ch))
+  );
+  const eligibleSingles = CONVERSATIONS.filter(
+    c => !c.isMix && c.chapters.every(ch => state.mixerSelected.has(ch))
+  );
+
+  const combinedPool = [...eligibleMixes, ...eligibleSingles];
+  document.getElementById("mixerResultsCount").textContent = `${eligibleMixes.length} cross-chapter mixes · ${eligibleSingles.length} single-chapter clips`;
+
+  const clipsGrid = document.getElementById("mixerClipsGrid");
+  if (eligibleMixes.length === 0) {
+    clipsGrid.innerHTML = `<p class="muted-meta">Select at least two chapters (e.g., Kapitel 1 + Kapitel 2 or Kapitel 1 + Kapitel 3) to unlock combined conversations.</p>`;
+    return;
+  }
+
+  clipsGrid.innerHTML = eligibleMixes
+    .map(
+      c => `<button class="clip-select-card" type="button" data-mixid="${escapeHtml(c.id)}">
+      <span class="csc-badge">${escapeHtml(c.category)}</span>
+      <h4 class="csc-title">${escapeHtml(c.title)}</h4>
+      <p class="csc-desc">${escapeHtml(c.context)}</p>
+    </button>`
+    )
+    .join("");
+
+  clipsGrid.querySelectorAll(".clip-select-card").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const target = CONVERSATIONS.find(c => c.id === btn.dataset.mixid);
+      if (target) {
+        state.playlist = combinedPool;
+        loadConversation(target, true);
+        setMode("listen");
+      }
+    });
+  });
+}
+
+// ─── Initialize App ───
+updateCoverageBadge();
+rebuildPlaylistForCategory("All");
+loadConversation(state.currentClip, false);
