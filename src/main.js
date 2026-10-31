@@ -208,6 +208,8 @@ const modalChapterTabs = document.getElementById("modalChapterTabs");
 const episodesListBody = document.getElementById("episodesListBody");
 const wordPopover = document.getElementById("wordPopover");
 const wordPopoverBody = document.getElementById("wordPopoverBody");
+const langHintBtn = document.getElementById("langHintBtn");
+const langHintPopover = document.getElementById("langHintPopover");
 
 // ─── Top-Layer Animation & Light-Dismiss Helpers ───
 let supportsDisplayTransition;
@@ -291,7 +293,12 @@ function articleBadgeHtml(article) {
   if (!article || article === "—") return "";
   const clean = article.toLowerCase();
   const cls = clean === "der" ? "art-der" : clean === "die" ? "art-die" : clean === "das" ? "art-das" : "";
-  return `<span class="${cls}">${escapeHtml(article)}</span> `;
+  return `<span class="notranslate ${cls}" lang="de" translate="no">${escapeHtml(article)}</span> `;
+}
+
+function deSpan(text, extraClass = "") {
+  const cls = extraClass ? `notranslate ${extraClass}` : "notranslate";
+  return `<span class="${cls}" lang="de" translate="no">${escapeHtml(text)}</span>`;
 }
 
 function pronounceSingleWord(text) {
@@ -312,7 +319,9 @@ function updateCoverageBadge() {
     if (progress.heardKeys[item.key]) heard++;
   }
   const chNum = chKey.replace("kap-", "");
-  coverageText.textContent = `Kap. ${chNum}: ${heard} / ${chWords.length} heard`;
+  coverageText.innerHTML = `${deSpan(`Kap. ${chNum}`)}: <span class="notranslate" translate="no">${heard} / ${
+    chWords.length
+  }</span> <span translate="yes">heard</span>`;
 }
 
 // ─── Switch Top-Level Views ───
@@ -349,8 +358,10 @@ function rebuildPlaylistForChapter(chId, category = "All") {
 
 function renderCategoryStrip() {
   if (state.currentClip?.isMix) {
-    categoryFilterBar.innerHTML = `<span class="cat-pill is-active">${escapeHtml(state.currentClip.category)}</span>
-      <button class="cat-pill" type="button" id="exitMixBtn">← Back to ${escapeHtml(
+    categoryFilterBar.innerHTML = `<span class="cat-pill is-active notranslate" lang="de" translate="no">${escapeHtml(
+      state.currentClip.category
+    )}</span>
+      <button class="cat-pill" type="button" id="exitMixBtn">← Back to ${deSpan(
         `Kapitel ${state.activeChapter.replace("kap-", "")}`
       )}</button>`;
     document.getElementById("exitMixBtn")?.addEventListener("click", () => {
@@ -366,8 +377,11 @@ function renderCategoryStrip() {
   categoryFilterBar.innerHTML = categories
     .map(cat => {
       const active = state.activeCategory === cat ? "is-active" : "";
-      const label = cat === "All" ? `All (${chapterClips.length})` : cat;
-      return `<button class="cat-pill ${active}" type="button" data-cat="${escapeHtml(cat)}">${escapeHtml(label)}</button>`;
+      const inner =
+        cat === "All"
+          ? `All (<span class="notranslate" translate="no">${chapterClips.length}</span>)`
+          : deSpan(cat);
+      return `<button class="cat-pill ${active}" type="button" data-cat="${escapeHtml(cat)}">${inner}</button>`;
     })
     .join("");
 
@@ -450,14 +464,19 @@ function renderTranscript(conv) {
 
     const speakerMeta = document.createElement("div");
     speakerMeta.className = "speaker-tag";
-    speakerMeta.innerHTML = `<span>${escapeHtml(line.speakerName)}</span><span class="speaker-region">${escapeHtml(line.voiceLabel || "")}</span>`;
+    speakerMeta.innerHTML = `<span class="notranslate" translate="no">${escapeHtml(
+      line.speakerName
+    )}</span><span class="speaker-region" translate="yes">${escapeHtml(line.voiceLabel || "")}</span>`;
 
     const pDe = document.createElement("p");
-    pDe.className = "utterance-de";
+    pDe.className = "utterance-de notranslate";
+    pDe.lang = "de";
+    pDe.translate = false;
 
     line.tokens.forEach((tok, tokIdx) => {
       const span = document.createElement("span");
-      span.className = "word-token";
+      span.className = "word-token notranslate";
+      span.translate = false;
       span.textContent = tok.text;
       span.tabIndex = 0;
       span.addEventListener("click", e => {
@@ -486,9 +505,10 @@ function renderTranscript(conv) {
     });
 
     const pEn = document.createElement("p");
-    pEn.className = "utterance-en";
+    pEn.className = state.showEnglish ? "utterance-en" : "utterance-en is-collapsed";
+    pEn.setAttribute("translate", "yes");
+    pEn.setAttribute("aria-hidden", String(!state.showEnglish));
     pEn.textContent = line.en;
-    pEn.hidden = !state.showEnglish;
 
     row.append(speakerMeta, pDe, pEn);
     transcriptContainer.appendChild(row);
@@ -512,7 +532,9 @@ function renderWordsDrawer(conv) {
     if (!items || items.length === 0) continue;
 
     html += `<section class="pos-section">
-      <h3 class="pos-section-title"><span>${escapeHtml(label)}</span><span>${items.length}</span></h3>
+      <h3 class="pos-section-title"><span translate="yes">${escapeHtml(
+        label
+      )}</span><span class="notranslate" translate="no">${items.length}</span></h3>
       <div class="drawer-word-list">
         ${items
           .map(w => {
@@ -522,8 +544,8 @@ function renderWordsDrawer(conv) {
                 ? ` <span class="muted-meta">· ${escapeHtml(w.plural)}</span>`
                 : "";
             return `<div class="drawer-word-item" data-vkey="${escapeHtml(w.key)}">
-              <span class="dw-de">${art}${escapeHtml(w.german)}${pl}</span>
-              <span class="dw-en">${escapeHtml(w.english)}</span>
+              <span class="dw-de notranslate" lang="de" translate="no">${art}${escapeHtml(w.german)}${pl}</span>
+              <span class="dw-en" translate="yes">${escapeHtml(w.english)}</span>
             </div>`;
           })
           .join("")}
@@ -546,45 +568,52 @@ function handleWordClick(targetEl, tok, line) {
 
   const endingHtml = endingInfo
     ? `<div class="wp-ending-box">
-        <div class="wp-ending-badge">${escapeHtml(endingInfo.badge)}</div>
-        <div class="wp-ending-desc">${escapeHtml(endingInfo.explanation)}</div>
+        <div class="wp-ending-badge notranslate" lang="de" translate="no">${escapeHtml(endingInfo.badge)}</div>
+        <div class="wp-ending-desc" translate="yes">${escapeHtml(endingInfo.explanation)}</div>
       </div>`
     : "";
 
   if (entry) {
     const chDisplay =
       entry.chapter === "spoken"
-        ? "Everyday Spoken"
-        : `A1 · Kap. ${String(entry.chapter).replace("kap-", "")}`;
+        ? `<span>Everyday Spoken</span>`
+        : deSpan(`A1 · Kap. ${String(entry.chapter).replace("kap-", "")}`);
     const posName = POS_SINGULAR[entry.category] || entry.category;
     const headHtml =
       entry.category === "nouns"
         ? `${articleBadgeHtml(entry.article)}${escapeHtml(entry.german)}`
         : escapeHtml(entry.german);
 
-    let subform = `Spoken in line: “${escapeHtml(cleanSurface)}”`;
+    let subform = `Spoken in line: “${deSpan(cleanSurface)}”`;
     if (entry.category === "nouns" && entry.plural) {
-      subform = `Plural: ${escapeHtml(entry.plural)}`;
+      subform = `Plural: ${deSpan(entry.plural)}`;
     } else if (entry.category === "verbs" && entry.subType) {
-      subform = `Verb (${escapeHtml(entry.subType)}) · spoken as “${escapeHtml(cleanSurface)}”`;
+      subform = `Verb (${escapeHtml(entry.subType)}) · spoken as “${deSpan(cleanSurface)}”`;
+    }
+
+    let exampleHtml = "";
+    if (entry.exampleA1) {
+      if (entry.chapter === "spoken") {
+        exampleHtml = `<p class="wp-example" translate="yes">${escapeHtml(entry.exampleA1)}</p>`;
+      } else {
+        exampleHtml = `<p class="wp-example">“${deSpan(entry.exampleA1)}”${
+          entry.exampleEn
+            ? `<br/><span class="muted-meta" translate="yes">${escapeHtml(entry.exampleEn)}</span>`
+            : ""
+        }</p>`;
+      }
     }
 
     wordPopoverBody.innerHTML = `
       <div class="wp-meta">
-        <span>${escapeHtml(posName)}</span>
-        <span>${escapeHtml(chDisplay)}</span>
+        <span translate="yes">${escapeHtml(posName)}</span>
+        ${chDisplay}
       </div>
-      <h3 class="wp-headword">${headHtml}</h3>
+      <h3 class="wp-headword notranslate" lang="de" translate="no">${headHtml}</h3>
       <p class="wp-subform">${subform}</p>
-      <p class="wp-meaning">${escapeHtml(entry.english)}</p>
+      <p class="wp-meaning" translate="yes">${escapeHtml(entry.english)}</p>
       ${endingHtml}
-      ${
-        entry.exampleA1
-          ? `<p class="wp-example">“${escapeHtml(entry.exampleA1)}”${
-              entry.exampleEn ? `<br/><span class="muted-meta">${escapeHtml(entry.exampleEn)}</span>` : ""
-            }</p>`
-          : ""
-      }
+      ${exampleHtml}
       <div class="wp-actions">
         <button id="wpSpeakBtn" class="wp-btn" type="button">Pronounce</button>
         <button id="wpResumeBtn" class="wp-btn wp-btn-primary" type="button">Resume ▸</button>
@@ -598,11 +627,11 @@ function handleWordClick(targetEl, tok, line) {
   } else {
     wordPopoverBody.innerHTML = `
       <div class="wp-meta">
-        <span>${endingInfo ? "Grammar Form" : "Context"}</span>
-        <span>Line Meaning</span>
+        <span translate="yes">${endingInfo ? "Grammar Form" : "Context"}</span>
+        <span translate="yes">Line Meaning</span>
       </div>
-      <h3 class="wp-headword">${escapeHtml(cleanSurface || tok.text)}</h3>
-      <p class="wp-meaning">${escapeHtml(line.en)}</p>
+      <h3 class="wp-headword notranslate" lang="de" translate="no">${escapeHtml(cleanSurface || tok.text)}</h3>
+      <p class="wp-meaning" translate="yes">${escapeHtml(line.en)}</p>
       ${endingHtml}
       <div class="wp-actions">
         <button id="wpSpeakBtn" class="wp-btn" type="button">Pronounce</button>
@@ -769,10 +798,29 @@ speedBtn.addEventListener("click", () => {
 toggleEnBtn.addEventListener("click", () => {
   state.showEnglish = !state.showEnglish;
   toggleEnBtn.setAttribute("aria-pressed", String(state.showEnglish));
-  toggleEnBtn.textContent = state.showEnglish ? "EN On" : "EN Off";
+  toggleEnBtn.textContent = state.showEnglish ? "Meaning On" : "Meaning Off";
   domLineRefs.forEach(l => {
-    l.enEl.hidden = !state.showEnglish;
+    l.enEl.classList.toggle("is-collapsed", !state.showEnglish);
+    l.enEl.setAttribute("aria-hidden", String(!state.showEnglish));
   });
+});
+
+// Position Multi-Language Popover below topbar button when opened
+function positionLangPopover() {
+  if (!langHintBtn || !langHintPopover) return;
+  const rect = langHintBtn.getBoundingClientRect();
+  const popWidth = Math.min(340, window.innerWidth - 32);
+  let left = rect.right - popWidth;
+  left = Math.max(16, Math.min(left, window.innerWidth - popWidth - 16));
+  const top = rect.bottom + 8;
+  langHintPopover.style.left = `${Math.round(left)}px`;
+  langHintPopover.style.top = `${Math.round(top)}px`;
+}
+
+langHintPopover?.addEventListener("beforetoggle", e => {
+  if (e.newState === "open") {
+    positionLangPopover();
+  }
 });
 
 document.addEventListener("keydown", e => {
@@ -806,7 +854,8 @@ function renderEpisodesModalList() {
   modalChapterTabs.innerHTML = tabs
     .map(t => {
       const active = state.modalSelectedTab === t.key ? "is-active" : "";
-      return `<button class="cat-pill ${active}" type="button" data-mtab="${t.key}">${escapeHtml(t.label)}</button>`;
+      const inner = t.key === "mix" ? escapeHtml(t.label) : deSpan(t.label);
+      return `<button class="cat-pill ${active}" type="button" data-mtab="${t.key}">${inner}</button>`;
     })
     .join("");
 
@@ -829,10 +878,10 @@ function renderEpisodesModalList() {
       const dur = formatTime(c.durationMs);
       return `<button class="episode-pick-row ${curr}" type="button" data-cid="${escapeHtml(c.id)}">
         <span class="ep-row-left">
-          <span class="ep-row-num">${String(idx + 1).padStart(2, "0")}</span>
-          <span class="ep-row-title">${escapeHtml(c.title)}${done}</span>
+          <span class="ep-row-num notranslate" translate="no">${String(idx + 1).padStart(2, "0")}</span>
+          <span class="ep-row-title notranslate" lang="de" translate="no">${escapeHtml(c.title)}${done}</span>
         </span>
-        <span class="ep-row-cat">${escapeHtml(c.category)} · ${dur}</span>
+        <span class="ep-row-cat">${deSpan(c.category)} · <span class="notranslate" translate="no">${dur}</span></span>
       </button>`;
     })
     .join("");
@@ -889,7 +938,7 @@ function renderSyllabusView() {
   chRow.innerHTML = chapters
     .map(c => {
       const active = c.id === chMeta.id ? "is-active" : "";
-      return `<button class="ch-num-pill ${active}" type="button" data-chid="${c.id}">Kap. ${c.number}</button>`;
+      return `<button class="ch-num-pill ${active} notranslate" lang="de" translate="no" type="button" data-chid="${c.id}">Kap. ${c.number}</button>`;
     })
     .join("");
 
@@ -982,31 +1031,36 @@ function renderSyllabusVocab(chId) {
       const art = w.category === "nouns" ? articleBadgeHtml(w.article) : "";
       const pl =
         w.category === "nouns" && w.plural && w.plural !== "— (Sg.)"
-          ? `<div class="muted-meta" style="font-size:0.76rem">Pl: ${escapeHtml(w.plural)}</div>`
+          ? `<div class="muted-meta vc-plural">Pl: ${deSpan(w.plural)}</div>`
           : "";
 
-      return `<article class="vocab-card ${deferCls}" data-speak="${escapeHtml(
+      return `<article class="vocab-card vocab-card-interactive ${deferCls}" data-speak="${escapeHtml(
         w.article ? `${w.article} ${w.german}` : w.german
-      )}" title="Click to hear pronunciation">
+      )}">
         <div>
           <div class="vc-top">
-            <span class="vc-word">${art}${escapeHtml(w.german)}</span>
+            <span class="vc-word notranslate" lang="de" translate="no">${art}${escapeHtml(w.german)}</span>
             ${
               heard
-                ? `<span class="vc-heard-dot">Heard</span>`
-                : `<span class="muted-meta" style="font-size:0.72rem">${escapeHtml(POS_SINGULAR[w.category])}</span>`
+                ? `<span class="vc-heard-dot" translate="yes">Heard</span>`
+                : `<span class="muted-meta vc-pos-tag" translate="yes">${escapeHtml(POS_SINGULAR[w.category])}</span>`
             }
           </div>
           ${pl}
-          <div class="vc-en">${escapeHtml(w.english)}</div>
+          <div class="vc-en" translate="yes">${escapeHtml(w.english)}</div>
         </div>
-        ${w.exampleA1 ? `<div class="vc-ex">${escapeHtml(w.exampleA1)}</div>` : ""}
+        ${
+          w.exampleA1
+            ? `<div class="vc-ex">${deSpan(w.exampleA1)}${
+                w.exampleEn ? `<span class="vc-ex-en" translate="yes">${escapeHtml(w.exampleEn)}</span>` : ""
+              }</div>`
+            : ""
+        }
       </article>`;
     })
     .join("");
 
   grid.querySelectorAll(".vocab-card").forEach(card => {
-    card.style.cursor = "pointer";
     card.addEventListener("click", () => pronounceSingleWord(card.dataset.speak));
   });
 }
@@ -1016,14 +1070,16 @@ function renderSyllabusGrammar(chMeta) {
   listEl.innerHTML = (chMeta.grammarTopics || [])
     .map(
       g => `<article class="grammar-card">
-      <h3 class="gc-title">${escapeHtml(g.title)}</h3>
-      <p class="gc-rule">${escapeHtml(g.rule)}</p>
-      <div class="gc-pattern">${escapeHtml(g.pattern)}</div>
+      <h3 class="gc-title" translate="yes">${escapeHtml(g.title)}</h3>
+      <p class="gc-rule" translate="yes">${escapeHtml(g.rule)}</p>
+      <div class="gc-pattern notranslate" lang="de" translate="no">${escapeHtml(g.pattern)}</div>
       <div class="gc-examples">
         ${(g.examples || [])
           .map(
             ex =>
-              `<div><strong>${escapeHtml(ex.de)}</strong> — <span class="muted-meta">${escapeHtml(ex.en)}</span></div>`
+              `<div><strong class="notranslate" lang="de" translate="no">${escapeHtml(
+                ex.de
+              )}</strong> — <span class="muted-meta" translate="yes">${escapeHtml(ex.en)}</span></div>`
           )
           .join("")}
       </div>
@@ -1036,23 +1092,23 @@ function renderSyllabusEndings() {
   const container = document.getElementById("endingsContentList");
   const tablesHtml = ENDINGS_REFERENCE_TABLES.map(
     tbl => `<article class="grammar-card">
-      <h3 class="gc-title">${escapeHtml(tbl.title)}</h3>
-      <p class="gc-rule">${escapeHtml(tbl.subtitle)}</p>
+      <h3 class="gc-title" translate="yes">${escapeHtml(tbl.title)}</h3>
+      <p class="gc-rule" translate="yes">${escapeHtml(tbl.subtitle)}</p>
       <table class="endings-table">
         <thead>
           <tr>
-            <th>Ending</th>
-            <th>Pattern &amp; Examples</th>
-            <th>When It Appears</th>
+            <th translate="yes">Ending</th>
+            <th translate="yes">Pattern &amp; Examples</th>
+            <th translate="yes">When It Appears</th>
           </tr>
         </thead>
         <tbody>
           ${tbl.rows
             .map(
               r => `<tr>
-              <td class="ending-code">${escapeHtml(r.ending)}</td>
-              <td><strong>${escapeHtml(r.pattern)}</strong></td>
-              <td class="muted-meta">${escapeHtml(r.note)}</td>
+              <td class="ending-code notranslate" lang="de" translate="no">${escapeHtml(r.ending)}</td>
+              <td><strong class="notranslate" lang="de" translate="no">${escapeHtml(r.pattern)}</strong></td>
+              <td class="muted-meta" translate="yes">${escapeHtml(r.note)}</td>
             </tr>`
             )
             .join("")}
@@ -1062,19 +1118,19 @@ function renderSyllabusEndings() {
   ).join("");
 
   const closingsHtml = `<article class="grammar-card">
-    <h3 class="gc-title">5. Everyday Spoken Closings, Greetings &amp; Fillers</h3>
-    <p class="gc-rule">Natural expressions used by German speakers to open, react, and end conversations smoothly. Click any card to hear pronunciation.</p>
-    <div class="vocab-grid" style="margin-top:14px">
+    <h3 class="gc-title" translate="yes">5. Everyday Spoken Closings, Greetings &amp; Fillers</h3>
+    <p class="gc-rule" translate="yes">Natural expressions used by German speakers to open, react, and end conversations smoothly. Click any card to hear pronunciation.</p>
+    <div class="vocab-grid closings-grid">
       ${SPOKEN_EXPRESSIONS.map(
-        exp => `<div class="vocab-card expr-speak-card" data-speak="${escapeHtml(exp.german)}" style="cursor:pointer">
+        exp => `<div class="vocab-card vocab-card-interactive expr-speak-card" data-speak="${escapeHtml(exp.german)}">
           <div>
             <div class="vc-top">
-              <span class="vc-word">${escapeHtml(exp.german)}</span>
-              <span class="muted-meta" style="font-size:0.72rem">${escapeHtml(exp.type)}</span>
+              <span class="vc-word notranslate" lang="de" translate="no">${escapeHtml(exp.german)}</span>
+              <span class="muted-meta vc-pos-tag" translate="yes">${escapeHtml(exp.type)}</span>
             </div>
-            <div class="vc-en">${escapeHtml(exp.english)}</div>
+            <div class="vc-en" translate="yes">${escapeHtml(exp.english)}</div>
           </div>
-          <div class="vc-ex">${escapeHtml(exp.usage)}</div>
+          <div class="vc-ex" translate="yes">${escapeHtml(exp.usage)}</div>
         </div>`
       ).join("")}
     </div>
@@ -1125,10 +1181,10 @@ function renderMixerView() {
       ready ? "" : "disabled"
     }>
       <div class="mc-top">
-        <span>Kapitel ${ch.number}</span>
-        <span>${ready ? (selected ? "Selected ✓" : "Select") : "Audio Soon"}</span>
+        <span class="notranslate" lang="de" translate="no">Kapitel ${ch.number}</span>
+        <span translate="yes">${ready ? (selected ? "Selected ✓" : "Select") : "Audio Soon"}</span>
       </div>
-      <div class="mc-title">${escapeHtml(ch.title)}</div>
+      <div class="mc-title notranslate" lang="de" translate="no">${escapeHtml(ch.title)}</div>
     </button>`;
   }).join("");
 
@@ -1163,9 +1219,11 @@ function renderMixerView() {
   clipsGrid.innerHTML = eligibleMixes
     .map(
       c => `<button class="clip-select-card" type="button" data-mixid="${escapeHtml(c.id)}">
-      <span class="csc-badge">${escapeHtml(c.category)} · ${formatTime(c.durationMs)}</span>
-      <h4 class="csc-title">${escapeHtml(c.title)}</h4>
-      <p class="csc-desc">${escapeHtml(c.context)}</p>
+      <span class="csc-badge">${deSpan(c.category)} · <span class="notranslate" translate="no">${formatTime(
+        c.durationMs
+      )}</span></span>
+      <h4 class="csc-title notranslate" lang="de" translate="no">${escapeHtml(c.title)}</h4>
+      <p class="csc-desc" translate="yes">${escapeHtml(c.context)}</p>
     </button>`
     )
     .join("");

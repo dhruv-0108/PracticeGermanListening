@@ -386,6 +386,15 @@ button {
   margin: 8px 0 0;
   font-size: 0.88rem;
   color: var(--ink-secondary);
+  transition: opacity 0.16s ease;
+}
+
+.utterance-en.is-collapsed {
+  margin: 0;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 /* ─── Bottom Floating Audio Transport ─── */
@@ -1356,4 +1365,54 @@ dialog.modal-sheet[open]:where(:not([data-closing])) {
   font-weight: 600;
   color: var(--accent);
   white-space: nowrap;
+}
+
+/* ─── Multi-Language Popover & Vocabulary Card Helpers ─── */
+.lang-hint-trigger {
+  border: 1px solid var(--border);
+  background-color: var(--bg-elevated);
+}
+
+.lang-popover {
+  width: min(340px, calc(100vw - 32px));
+}
+
+.lang-popover-lead {
+  margin-top: 6px;
+}
+
+.lang-popover-note {
+  margin-bottom: 0;
+}
+
+.lang-popover code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.74rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background-color: var(--bg-subtle);
+  color: var(--ink);
+}
+
+.vocab-card-interactive {
+  cursor: pointer;
+}
+
+.vc-plural {
+  font-size: 0.76rem;
+}
+
+.vc-pos-tag {
+  font-size: 0.72rem;
+}
+
+.vc-ex-en {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.76rem;
+  color: var(--ink-muted);
+}
+
+.closings-grid {
+  margin-top: 14px;
 }

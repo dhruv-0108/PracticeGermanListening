@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" translate="yes">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -17,12 +17,19 @@
       <!-- Minimal Top Bar -->
       <header class="topbar">
         <div class="topbar-left">
-          <button id="brandBtn" class="brand-mark" type="button" aria-label="Go to Listening Player">
+          <button
+            id="brandBtn"
+            class="brand-mark notranslate"
+            lang="de"
+            translate="no"
+            type="button"
+            aria-label="Go to Listening Player"
+          >
             Hören
           </button>
           <span class="topbar-divider" aria-hidden="true">/</span>
           <button id="chapterPickerBtn" class="chapter-trigger" type="button">
-            <span id="currentChapterLabel">A1 · Kapitel 1</span>
+            <span id="currentChapterLabel" class="notranslate" lang="de" translate="no">A1 · Kapitel 1</span>
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
               <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
@@ -36,12 +43,21 @@
         </nav>
 
         <div class="topbar-right">
-          <button id="coverageBtn" class="coverage-pill" type="button" title="View Chapter Vocabulary Progress">
-            <span id="coverageText">0 / 203 heard</span>
+          <button
+            id="langHintBtn"
+            class="ghost-control lang-hint-trigger"
+            type="button"
+            popovertarget="langHintPopover"
+            aria-label="Language translation options (130+ languages)"
+          >
+            Languages
+          </button>
+          <button id="coverageBtn" class="coverage-pill" type="button">
+            <span id="coverageText">Kap. 1: 0 / 203 heard</span>
           </button>
           <button id="openWordsDrawerBtn" class="words-toggle-btn" type="button">
             <span>Words</span>
-            <span id="clipWordsCount" class="count-chip">0</span>
+            <span id="clipWordsCount" class="count-chip notranslate" translate="no">0</span>
           </button>
         </div>
       </header>
@@ -57,14 +73,18 @@
           <!-- Episode Header -->
           <div class="episode-header">
             <div class="episode-kicker-row">
-              <span id="episodeCounter" class="episode-counter">01 / 25</span>
+              <span id="episodeCounter" class="episode-counter notranslate" translate="no">01 / 25</span>
               <span class="dot-sep" aria-hidden="true">·</span>
-              <span id="episodeCategory" class="episode-category">Begrüßung &amp; Kennenlernen</span>
+              <span id="episodeCategory" class="episode-category notranslate" lang="de" translate="no">
+                Begrüßung &amp; Kennenlernen
+              </span>
               <span id="episodeLengthBadge" class="length-pill">Medium</span>
               <button id="openEpisodeListBtn" class="all-clips-link" type="button">All clips</button>
             </div>
-            <h1 id="episodeTitle" class="episode-title">Hallo im Haus</h1>
-            <p id="episodeContext" class="episode-context">Two neighbors meet in the hallway for the first time.</p>
+            <h1 id="episodeTitle" class="episode-title notranslate" lang="de" translate="no">Hallo im Haus</h1>
+            <p id="episodeContext" class="episode-context" translate="yes">
+              Two neighbors meet in the hallway for the first time.
+            </p>
           </div>
 
           <!-- Flowing Interactive Transcript -->
@@ -75,7 +95,7 @@
         <footer class="player-dock" aria-label="Audio controls">
           <div class="player-dock-inner">
             <div class="timeline-row">
-              <span id="timeCurrent" class="time-readout">0:00</span>
+              <span id="timeCurrent" class="time-readout notranslate" translate="no">0:00</span>
               <input
                 id="seekSlider"
                 class="seek-slider"
@@ -86,41 +106,54 @@
                 step="1"
                 aria-label="Seek audio position"
               />
-              <span id="timeTotal" class="time-readout">0:00</span>
+              <span id="timeTotal" class="time-readout notranslate" translate="no">0:00</span>
             </div>
 
             <div class="controls-row">
               <div class="controls-secondary">
-                <button id="speedBtn" class="ghost-control" type="button" title="Playback speed">1.0×</button>
-                <button id="toggleEnBtn" class="ghost-control" type="button" aria-pressed="false" title="Toggle English translation">
-                  EN Off
+                <button
+                  id="speedBtn"
+                  class="ghost-control notranslate"
+                  translate="no"
+                  type="button"
+                  aria-label="Playback speed"
+                >
+                  1.0×
+                </button>
+                <button
+                  id="toggleEnBtn"
+                  class="ghost-control"
+                  type="button"
+                  aria-pressed="false"
+                >
+                  Meaning Off
                 </button>
               </div>
 
               <div class="controls-primary">
-                <button id="prevClipBtn" class="icon-control" type="button" aria-label="Previous conversation" title="Previous clip">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <button id="prevClipBtn" class="icon-control" type="button" aria-label="Previous conversation">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="M19 20L9 12L19 4V20Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
                     <path d="M5 19V5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
                   </svg>
                 </button>
 
-                <button id="rewindBtn" class="icon-control" type="button" aria-label="Rewind 4 seconds" title="Back 4 seconds">
-                  <span class="rewind-label">-4s</span>
+                <button id="rewindBtn" class="icon-control" type="button" aria-label="Rewind 4 seconds">
+                  <span class="rewind-label notranslate" translate="no">-4s</span>
                 </button>
 
-                <button id="playPauseBtn" class="play-btn" type="button" aria-label="Play or pause audio (Space)">
-                  <svg id="playIcon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <button id="playPauseBtn" class="play-btn" type="button" aria-label="Play or pause audio">
+                  <svg id="playIcon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M7 5.5V18.5L18 12L7 5.5Z" />
                   </svg>
-                  <svg id="pauseIcon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" hidden>
+                  <svg id="pauseIcon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" hidden>
                     <rect x="6.5" y="5" width="3.8" height="14" rx="1" />
                     <rect x="13.7" y="5" width="3.8" height="14" rx="1" />
                   </svg>
                 </button>
 
-                <button id="nextClipBtn" class="icon-control" type="button" aria-label="Next conversation" title="Next clip">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <button id="nextClipBtn" class="icon-control" type="button" aria-label="Next conversation">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="M5 4L15 12L5 20V4Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
                     <path d="M19 5V19" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
                   </svg>
@@ -128,7 +161,7 @@
               </div>
 
               <div class="controls-secondary controls-right">
-                <button id="bottomWordsBtn" class="ghost-control" type="button" title="Show words used in this clip">
+                <button id="bottomWordsBtn" class="ghost-control" type="button">
                   Clip Words
                 </button>
               </div>
@@ -143,16 +176,20 @@
           <div class="syllabus-hero">
             <div class="syllabus-level-row">
               <div class="level-Segment">
-                <button class="level-pill is-active" data-level="A1" type="button">Netzwerk A1</button>
-                <button class="level-pill" data-level="A2" type="button">Netzwerk A2</button>
+                <button class="level-pill is-active notranslate" lang="de" translate="no" data-level="A1" type="button">
+                  Netzwerk A1
+                </button>
+                <button class="level-pill notranslate" lang="de" translate="no" data-level="A2" type="button">
+                  Netzwerk A2
+                </button>
               </div>
               <div id="syllabusChapterSelectRow" class="chapter-pills-row"></div>
             </div>
 
             <div class="syllabus-title-block">
-              <p id="syllabusThemeKicker" class="syllabus-kicker">Kapitel 1</p>
-              <h2 id="syllabusTitle" class="syllabus-heading">Guten Tag!</h2>
-              <p id="syllabusSubtitle" class="syllabus-subtitle"></p>
+              <p id="syllabusThemeKicker" class="syllabus-kicker notranslate" lang="de" translate="no">Kapitel 1</p>
+              <h2 id="syllabusTitle" class="syllabus-heading notranslate" lang="de" translate="no">Guten Tag!</h2>
+              <p id="syllabusSubtitle" class="syllabus-subtitle notranslate" lang="de" translate="no"></p>
               <div class="syllabus-actions-row">
                 <div class="subtab-group">
                   <button class="subtab-btn is-active" data-subtab="vocab" type="button">Vocabulary</button>
@@ -160,7 +197,7 @@
                   <button class="subtab-btn" data-subtab="endings" type="button">Endings &amp; Closings</button>
                 </div>
                 <button id="startChapterListeningBtn" class="primary-action-btn" type="button">
-                  Practice Kapitel 1 Voiceovers →
+                  Practice Voiceovers →
                 </button>
               </div>
             </div>
@@ -168,16 +205,16 @@
 
           <!-- Vocab Subview -->
           <div id="syllabusVocabPanel">
-            <div class="vocab-toolbar">
+            <search class="vocab-toolbar">
               <input
                 id="vocabSearchInput"
                 class="search-input"
                 type="search"
-                placeholder="Search German or English meaning..."
+                placeholder="Search German word or meaning..."
                 aria-label="Search chapter vocabulary"
               />
               <div id="posFilterRow" class="pos-filter-row"></div>
-            </div>
+            </search>
             <div id="syllabusVocabList" class="vocab-grid"></div>
           </div>
 
@@ -254,6 +291,21 @@
     <!-- FLOATING WORD LOOKUP POPOVER (Tap-to-pause & inspect any word) -->
     <div id="wordPopover" class="word-popover" popover="auto" role="dialog" aria-label="Word details">
       <div id="wordPopoverBody"></div>
+    </div>
+
+    <!-- MULTI-LANGUAGE BROWSER TRANSLATION HELPER POPOVER -->
+    <div id="langHintPopover" class="word-popover lang-popover" popover="auto" role="dialog" aria-label="Multi-language support">
+      <div class="wp-meta">
+        <span>130+ Languages</span>
+        <span>German Protected</span>
+      </div>
+      <h3 class="wp-headword">Use Your Native Language</h3>
+      <p class="wp-example lang-popover-lead">
+        Turn on your browser’s built-in <strong>Translate Page</strong> feature (Chrome, Brave, Safari, Edge, or mobile browser menu) to translate all word meanings, subtitles, and grammar notes into your language.
+      </p>
+      <p class="wp-subform lang-popover-note">
+        Every German sentence, word, and grammar pattern is locked (<code class="notranslate" translate="no">translate="no"</code>) so the German never gets altered.
+      </p>
     </div>
 
     <audio id="audioPlayer" preload="metadata"></audio>
