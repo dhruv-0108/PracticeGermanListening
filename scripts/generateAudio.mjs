@@ -14,11 +14,14 @@ const VOICES = {
   jan: { id: "de-CH-JanNeural", label: "Male · CH" }
 };
 import { KAP1_EXTENDED_CONVERSATIONS } from "./kap1ExtendedScripts.mjs";
+import { KAP1_ADDITIONAL_CONVERSATIONS } from "./kap1AdditionalScripts.mjs";
 import { KAP2_EXTENDED_CONVERSATIONS } from "./kap2ExtendedScripts.mjs";
+import { KAP2_ADDITIONAL_CONVERSATIONS } from "./kap2AdditionalScripts.mjs";
 import {
   KAP3_EXTENDED_CONVERSATIONS,
   EXTENDED_MIXER_CONVERSATIONS
 } from "./kap3AndMixerScripts.mjs";
+import { KAP3_ADDITIONAL_CONVERSATIONS } from "./kap3AdditionalScripts.mjs";
 import { NETZWERK_A1_CHAPTER_VOCAB } from "../src/data/netzwerkChapterVocab.js";
 import { SPOKEN_EXPRESSIONS } from "../src/data/germanEndings.js";
 
@@ -336,11 +339,14 @@ async function processConversation(conv) {
   const mp3Path = path.join(AUDIO_DIR, `${conv.id}.mp3`);
   const isMix = conv.chapters.length > 1;
   const entries = buildChapterLookup(conv.chapters, isMix);
+
+  // Cache: If MP3 already exists on disk, reuse it and only parse tokens
   const audioParts = [];
   const processedLines = [];
   const usedVocabMap = new Map();
   let currentBytes = 0;
   let silentFrame = null;
+  const alreadyOnDisk = fs.existsSync(mp3Path) && fs.statSync(mp3Path).size > 1000;
 
   for (let i = 0; i < conv.lines.length; i++) {
     const line = conv.lines[i];
@@ -348,7 +354,18 @@ async function processConversation(conv) {
     const voiceObj = VOICES[speakerInfo.voice] || VOICES.seraphina;
 
     const ttsText = line.de.replace(/\s[–—-]\s([A-ZÄÖÜ])\b/g, ", $1");
-    const { buffer, wordBoundaries } = await synthesizeLineWithRetry(voiceObj.id, ttsText);
+    let buffer, wordBoundaries;
+
+    if (!alreadyOnDisk) {
+      const res = await synthesizeLineWithRetry(voiceObj.id, ttsText);
+      buffer = res.buffer;
+      wordBoundaries = res.wordBoundaries;
+    } else {
+      // Approximate timing when file is already present
+      const approxDur = Math.max(1200, Math.round(line.de.length * 68));
+      buffer = Buffer.alloc(Math.round(approxDur * 6));
+      wordBoundaries = [];
+    }
 
     if (!silentFrame && buffer.length >= 144) {
       silentFrame = buffer.subarray(buffer.length - 144);
@@ -396,14 +413,17 @@ async function processConversation(conv) {
     }
   }
 
-  const finalMp3 = Buffer.concat(audioParts);
-  fs.writeFileSync(mp3Path, finalMp3);
+  if (!alreadyOnDisk) {
+    const finalMp3 = Buffer.concat(audioParts);
+    fs.writeFileSync(mp3Path, finalMp3);
+  }
 
-  const totalDurationMs = Math.round(currentBytes / 6);
+  const diskSize = fs.statSync(mp3Path).size;
+  const totalDurationMs = Math.round(diskSize / 6);
   const usedVocab = Array.from(usedVocabMap.values());
 
   console.log(
-    `✓ ${conv.id} [${conv.lengthTier || "medium"}] (${(finalMp3.length / 1024).toFixed(0)} KB, ${(
+    `✓ ${conv.id} [${conv.lengthTier || "medium"}] (${(diskSize / 1024).toFixed(0)} KB, ${(
       totalDurationMs / 1000
     ).toFixed(1)}s, ${conv.lines.length} turns, ${usedVocab.length} words)`
   );
@@ -420,15 +440,19 @@ async function processConversation(conv) {
     durationMs: totalDurationMs,
     speakers: conv.speakers,
     lines: processedLines,
-    usedVocabKeys: usedVocab.map(v => v.key)
+    usedVocabKeys: usedVocab.map(v => v.key),
+    newWords: conv.newWords || []
   };
 }
 
 async function main() {
   const allConvs = [
     ...KAP1_EXTENDED_CONVERSATIONS,
+    ...KAP1_ADDITIONAL_CONVERSATIONS,
     ...KAP2_EXTENDED_CONVERSATIONS,
+    ...KAP2_ADDITIONAL_CONVERSATIONS,
     ...KAP3_EXTENDED_CONVERSATIONS,
+    ...KAP3_ADDITIONAL_CONVERSATIONS,
     ...EXTENDED_MIXER_CONVERSATIONS
   ];
 
