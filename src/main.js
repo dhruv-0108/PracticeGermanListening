@@ -15,7 +15,65 @@ if (!("popover" in HTMLElement.prototype)) {
 
 const AUDIO_BASE_URL = import.meta.env.VITE_AUDIO_BASE_URL || "/audio";
 const STORAGE_KEY = "horen_listening_progress_v2";
+const LANG_STORAGE_KEY = "horen_user_native_lang_v1";
 const SPEEDS = [1.0, 0.85, 0.75, 1.15];
+
+const POPULAR_LANGUAGES = [
+  { code: "en", name: "English", native: "English", flag: "🇬🇧" },
+  { code: "es", name: "Spanish", native: "Español", flag: "🇪🇸" },
+  { code: "hi", name: "Hindi", native: "हिन्दी", flag: "🇮🇳" },
+  { code: "fr", name: "French", native: "Français", flag: "🇫🇷" },
+  { code: "tr", name: "Turkish", native: "Türkçe", flag: "🇹🇷" },
+  { code: "pt", name: "Portuguese", native: "Português", flag: "🇵🇹" },
+  { code: "ar", name: "Arabic", native: "العربية", flag: "🇸🇦" },
+  { code: "ru", name: "Russian", native: "Русский", flag: "🇷🇺" },
+  { code: "it", name: "Italian", native: "Italiano", flag: "🇮🇹" },
+  { code: "pl", name: "Polish", native: "Polski", flag: "🇵🇱" },
+  { code: "zh-CN", name: "Chinese (Simplified)", native: "简体中文", flag: "🇨🇳" },
+  { code: "ja", name: "Japanese", native: "日本語", flag: "🇯🇵" },
+  { code: "ko", name: "Korean", native: "한국어", flag: "🇰🇷" },
+  { code: "uk", name: "Ukrainian", native: "Українська", flag: "🇺🇦" },
+  { code: "id", name: "Indonesian", native: "Bahasa Indonesia", flag: "🇮🇩" }
+];
+
+const ALL_LANGUAGES = [
+  ...POPULAR_LANGUAGES,
+  { code: "af", name: "Afrikaans", native: "Afrikaans" },
+  { code: "sq", name: "Albanian", native: "Shqip" },
+  { code: "am", name: "Amharic", native: "አማርኛ" },
+  { code: "hy", name: "Armenian", native: "Հայերեն" },
+  { code: "az", name: "Azerbaijani", native: "Azərbaycan" },
+  { code: "bn", name: "Bengali", native: "বাংলা" },
+  { code: "bs", name: "Bosnian", native: "Bosanski" },
+  { code: "bg", name: "Bulgarian", native: "Български" },
+  { code: "ca", name: "Catalan", native: "Català" },
+  { code: "hr", name: "Croatian", native: "Hrvatski" },
+  { code: "cs", name: "Czech", native: "Čeština" },
+  { code: "da", name: "Danish", native: "Dansk" },
+  { code: "nl", name: "Dutch", native: "Nederlands" },
+  { code: "et", name: "Estonian", native: "Eesti" },
+  { code: "fa", name: "Persian", native: "فارسی" },
+  { code: "fi", name: "Finnish", native: "Suomi" },
+  { code: "el", name: "Greek", native: "Ελληνικά" },
+  { code: "gu", name: "Gujarati", native: "ગુજરાતી" },
+  { code: "he", name: "Hebrew", native: "עברית" },
+  { code: "hu", name: "Hungarian", native: "Magyar" },
+  { code: "is", name: "Icelandic", native: "Íslenska" },
+  { code: "mr", name: "Marathi", native: "मराठी" },
+  { code: "ms", name: "Malay", native: "Bahasa Melayu" },
+  { code: "no", name: "Norwegian", native: "Norsk" },
+  { code: "pa", name: "Punjabi", native: "ਪੰਜਾਬੀ" },
+  { code: "ro", name: "Romanian", native: "Română" },
+  { code: "sr", name: "Serbian", native: "Српски" },
+  { code: "sk", name: "Slovak", native: "Slovenčina" },
+  { code: "sl", name: "Slovenian", native: "Slovenščina" },
+  { code: "sv", name: "Swedish", native: "Svenska" },
+  { code: "ta", name: "Tamil", native: "தமிழ்" },
+  { code: "te", name: "Telugu", native: "తెలుగు" },
+  { code: "th", name: "Thai", native: "ไทย" },
+  { code: "ur", name: "Urdu", native: "اردو" },
+  { code: "vi", name: "Vietnamese", native: "Tiếng Việt" }
+].sort((a, b) => a.name.localeCompare(b.name));
 
 const POS_LABELS = {
   nouns: "Nouns",
@@ -220,8 +278,17 @@ const modalChapterTabs = document.getElementById("modalChapterTabs");
 const episodesListBody = document.getElementById("episodesListBody");
 const wordPopover = document.getElementById("wordPopover");
 const wordPopoverBody = document.getElementById("wordPopoverBody");
-const langHintBtn = document.getElementById("langHintBtn");
-const langHintPopover = document.getElementById("langHintPopover");
+
+const langPickerTriggerBtn = document.getElementById("langPickerTriggerBtn");
+const currentLangIcon = document.getElementById("currentLangIcon");
+const currentLangLabel = document.getElementById("currentLangLabel");
+const openWordsDrawerBtn = document.getElementById("openWordsDrawerBtn");
+const langSelectDialog = document.getElementById("langSelectDialog");
+const closeLangDialogBtn = document.getElementById("closeLangDialogBtn");
+const langSearchInput = document.getElementById("langSearchInput");
+const popularLangChips = document.getElementById("popularLangChips");
+const allLangList = document.getElementById("allLangList");
+const newWordsBanner = document.getElementById("newWordsBanner");
 
 // ─── Top-Layer Animation & Light-Dismiss Helpers ───
 let supportsDisplayTransition;
@@ -283,6 +350,7 @@ function wireDialogBehavior(dialog) {
 
 wireDialogBehavior(wordsDrawer);
 wireDialogBehavior(episodesDialog);
+wireDialogBehavior(langSelectDialog);
 
 // ─── Formatting Helpers ───
 function formatTime(ms) {
@@ -347,6 +415,11 @@ function setMode(mode) {
   listenView.hidden = mode !== "listen";
   syllabusView.hidden = mode !== "syllabus";
   mixerView.hidden = mode !== "mixer";
+
+  // "Words" drawer button in topbar only visible during listening scenario
+  if (openWordsDrawerBtn) {
+    openWordsDrawerBtn.hidden = mode !== "listen";
+  }
 
   if (mode === "feed") {
     renderFeedView();
@@ -621,6 +694,9 @@ function loadConversation(conv, autoplay = false) {
   episodeContext.textContent = conv.context;
   clipWordsCount.textContent = String(getClipUsedVocab(conv).length);
 
+  // Check if scenario uses any out-of-chapter words (only show banner if present)
+  renderNewWordsBanner(conv);
+
   renderCategoryStrip();
   renderTranscript(conv);
   renderWordsDrawer(conv);
@@ -703,6 +779,44 @@ function renderTranscript(conv) {
 }
 
 // ─── Render Right-Side Words Drawer (Hidden by default) ───
+// ─── Only show "New Words in this Scenario" if dialogue uses out-of-chapter words ───
+function renderNewWordsBanner(conv) {
+  if (!newWordsBanner) return;
+
+  const currentCh = conv.chapters[0] || "kap-1";
+  const used = getClipUsedVocab(conv);
+
+  // A word is considered outside the current chapter if its tagged chapter is different (e.g. Kap 2 or Kap 3 word in Kap 1)
+  const outsideWords = used.filter(w => {
+    if (conv.isMix) return false;
+    return w.chapter && w.chapter !== currentCh && w.chapter !== "spoken";
+  });
+
+  if (outsideWords.length === 0) {
+    newWordsBanner.hidden = true;
+    newWordsBanner.innerHTML = "";
+    return;
+  }
+
+  newWordsBanner.hidden = false;
+  newWordsBanner.innerHTML = `
+    <span class="nwb-label" translate="yes">New in this Scenario (${outsideWords.length} Words):</span>
+    <div class="nwb-list">
+      ${outsideWords
+        .map(w => {
+          const art = w.article ? `${w.article} ` : "";
+          return `
+            <span class="nwb-pill">
+              <strong class="nwb-word notranslate" lang="de" translate="no">${escapeHtml(art + w.german)}</strong>
+              <span class="nwb-meaning" translate="yes">${escapeHtml(w.english)}</span>
+            </span>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
 function renderWordsDrawer(conv) {
   const grouped = {};
   for (const pos of Object.keys(POS_LABELS)) grouped[pos] = [];
@@ -991,22 +1105,115 @@ toggleEnBtn.addEventListener("click", () => {
   });
 });
 
-// Position Multi-Language Popover below topbar button when opened
-function positionLangPopover() {
-  if (!langHintBtn || !langHintPopover) return;
-  const rect = langHintBtn.getBoundingClientRect();
-  const popWidth = Math.min(340, window.innerWidth - 32);
-  let left = rect.right - popWidth;
-  left = Math.max(16, Math.min(left, window.innerWidth - popWidth - 16));
-  const top = rect.bottom + 8;
-  langHintPopover.style.left = `${Math.round(left)}px`;
-  langHintPopover.style.top = `${Math.round(top)}px`;
+// ─── Native Language Selection Modal & Auto-Translate Engine ───
+let currentSelectedLang = localStorage.getItem(LANG_STORAGE_KEY) || "en";
+
+function updateLangDisplay() {
+  const match = ALL_LANGUAGES.find(l => l.code === currentSelectedLang) || {
+    name: "English",
+    native: "English",
+    flag: "🌐"
+  };
+  if (currentLangIcon) currentLangIcon.textContent = match.flag || "🌐";
+  if (currentLangLabel) currentLangLabel.textContent = match.native || match.name;
 }
 
-langHintPopover?.addEventListener("beforetoggle", e => {
-  if (e.newState === "open") {
-    positionLangPopover();
+function applyGoogleTranslation(targetLangCode) {
+  currentSelectedLang = targetLangCode;
+  localStorage.setItem(LANG_STORAGE_KEY, targetLangCode);
+  updateLangDisplay();
+
+  // Set the standard Google Translate cookie: /en/<targetLangCode>
+  const domain = window.location.hostname;
+  document.cookie = `googtrans=/en/${targetLangCode}; path=/; domain=${domain}`;
+  document.cookie = `googtrans=/en/${targetLangCode}; path=/;`;
+
+  // Dynamically load Google Translate element script if not already present
+  if (!window.google?.translate?.TranslateElement) {
+    window.googleTranslateElementInit = function () {
+      new window.google.translate.TranslateElement(
+        {
+          pageLanguage: "en",
+          includedLanguages: ALL_LANGUAGES.map(l => l.code).join(","),
+          autoDisplay: false
+        },
+        "google_translate_element"
+      );
+    };
+    if (!document.getElementById("google-translate-script")) {
+      const s = document.createElement("script");
+      s.id = "google-translate-script";
+      s.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
+      s.async = true;
+      document.body.appendChild(s);
+    }
+  } else {
+    // If already loaded, trigger translation switch
+    const select = document.querySelector(".goog-te-combo");
+    if (select) {
+      select.value = targetLangCode;
+      select.dispatchEvent(new Event("change"));
+    }
   }
+}
+
+function renderLangDialog(filterQuery = "") {
+  if (!popularLangChips || !allLangList) return;
+
+  const q = filterQuery.trim().toLowerCase();
+
+  popularLangChips.innerHTML = POPULAR_LANGUAGES.map(l => {
+    const active = l.code === currentSelectedLang ? "is-active" : "";
+    return `
+      <button class="lang-chip-btn ${active}" type="button" data-lcode="${l.code}">
+        <span>${l.flag || "🌐"}</span>
+        <span>${escapeHtml(l.native)}</span>
+      </button>
+    `;
+  }).join("");
+
+  const filteredAll = ALL_LANGUAGES.filter(
+    l => l.name.toLowerCase().includes(q) || (l.native && l.native.toLowerCase().includes(q))
+  );
+
+  allLangList.innerHTML = filteredAll
+    .map(l => {
+      const active = l.code === currentSelectedLang ? "is-active" : "";
+      return `
+        <button class="lang-list-item ${active}" type="button" data-lcode="${l.code}">
+          <span>${escapeHtml(l.name)}</span>
+          ${l.native && l.native !== l.name ? `<small style="opacity:0.75;margin-left:4px">(${escapeHtml(l.native)})</small>` : ""}
+        </button>
+      `;
+    })
+    .join("");
+
+  const handleSelect = btn => {
+    const code = btn.dataset.lcode;
+    applyGoogleTranslation(code);
+    closeDialogSmoothly(langSelectDialog);
+  };
+
+  popularLangChips.querySelectorAll(".lang-chip-btn").forEach(btn => {
+    btn.addEventListener("click", () => handleSelect(btn));
+  });
+
+  allLangList.querySelectorAll(".lang-list-item").forEach(btn => {
+    btn.addEventListener("click", () => handleSelect(btn));
+  });
+}
+
+function openLangSelectDialog() {
+  renderLangDialog();
+  if (langSearchInput) langSearchInput.value = "";
+  if (!langSelectDialog.open) langSelectDialog.showModal();
+}
+
+langPickerTriggerBtn?.addEventListener("click", openLangSelectDialog);
+closeLangDialogBtn?.addEventListener("click", () => closeDialogSmoothly(langSelectDialog));
+
+langSearchInput?.addEventListener("input", e => {
+  renderLangDialog(e.target.value);
 });
 
 document.addEventListener("keydown", e => {
@@ -1429,6 +1636,14 @@ function renderMixerView() {
 }
 
 // ─── Initialize App ───
+updateLangDisplay();
+if (!localStorage.getItem(LANG_STORAGE_KEY)) {
+  // First-time visit: Open Native Language Selector Modal
+  setTimeout(() => openLangSelectDialog(), 350);
+} else if (currentSelectedLang !== "en") {
+  applyGoogleTranslation(currentSelectedLang);
+}
+
 if (state.currentClip?.isMix) {
   state.playlist = CONVERSATIONS.filter(c => c.isMix);
 } else {

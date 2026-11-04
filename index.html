@@ -45,18 +45,18 @@
 
         <div class="topbar-right">
           <button
-            id="langHintBtn"
+            id="langPickerTriggerBtn"
             class="ghost-control lang-hint-trigger"
             type="button"
-            popovertarget="langHintPopover"
-            aria-label="Language translation options (130+ languages)"
+            aria-label="Select your native language"
           >
-            Languages
+            <span id="currentLangIcon">🌐</span>
+            <span id="currentLangLabel">English</span>
           </button>
           <button id="coverageBtn" class="coverage-pill" type="button">
             <span id="coverageText">Kap. 1: 0 / 203 heard</span>
           </button>
-          <button id="openWordsDrawerBtn" class="words-toggle-btn" type="button">
+          <button id="openWordsDrawerBtn" class="words-toggle-btn" type="button" hidden>
             <span>Words</span>
             <span id="clipWordsCount" class="count-chip notranslate" translate="no">0</span>
           </button>
@@ -141,6 +141,7 @@
             <p id="episodeContext" class="episode-context" translate="yes">
               Two neighbors meet in the hallway for the first time.
             </p>
+            <div id="newWordsBanner" class="new-words-banner" hidden></div>
           </div>
 
           <!-- Flowing Interactive Transcript -->
@@ -364,6 +365,47 @@
       </p>
     </div>
 
+    <!-- NATIVE LANGUAGE SELECTOR WELCOME MODAL (FIRST VISIT & USER SWITCH) -->
+    <dialog id="langSelectDialog" class="modal-sheet lang-select-dialog" closedby="any" aria-labelledby="langDialogTitle">
+      <div class="sheet-inner">
+        <header class="drawer-header">
+          <div>
+            <p class="drawer-kicker">Welcome to Hören</p>
+            <h2 id="langDialogTitle" class="drawer-title">Choose Your Native Language</h2>
+          </div>
+          <button id="closeLangDialogBtn" class="drawer-close-btn" type="button" aria-label="Close dialog">
+            ✕
+          </button>
+        </header>
+        <div class="lang-dialog-body">
+          <p class="lang-dialog-lead">
+            Select your language so word meanings, line translations, and grammar tips appear in your mother tongue. <strong>German sentences and audio remain 100% untouched.</strong>
+          </p>
+
+          <search class="lang-search-wrap">
+            <input
+              id="langSearchInput"
+              class="search-input"
+              type="search"
+              placeholder="Search 100+ languages (Hindi, Spanish, French, Turkish...)"
+              aria-label="Search languages"
+            />
+          </search>
+
+          <div class="lang-popular-section">
+            <p class="lang-section-label">Popular Languages:</p>
+            <div id="popularLangChips" class="popular-lang-grid"></div>
+          </div>
+
+          <div class="lang-all-section">
+            <p class="lang-section-label">All Languages:</p>
+            <div id="allLangList" class="all-lang-list"></div>
+          </div>
+        </div>
+      </div>
+    </dialog>
+
+    <div id="google_translate_element" style="display:none"></div>
     <audio id="audioPlayer" preload="metadata"></audio>
     <script type="module" src="/src/main.js"></script>
   </body>

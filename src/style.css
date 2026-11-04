@@ -1618,7 +1618,144 @@ dialog.modal-sheet[open]:where(:not([data-closing])) {
   white-space: nowrap;
 }
 
-/* ─── Multi-Language Popover & Vocabulary Card Helpers ─── */
+/* ─── Native Language Welcome Dialog & New Words Banner ─── */
+.lang-select-dialog {
+  width: min(560px, 94vw);
+}
+
+.lang-dialog-body {
+  padding: 20px 24px 28px;
+  overflow-y: auto;
+  max-height: 72dvh;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.lang-dialog-lead {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--ink-secondary);
+  line-height: 1.5;
+}
+
+.lang-dialog-lead strong {
+  color: var(--ink);
+}
+
+.lang-section-label {
+  margin: 0 0 8px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+}
+
+.popular-lang-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lang-chip-btn {
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  font-size: 0.86rem;
+  font-weight: 500;
+  color: var(--ink);
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lang-chip-btn:hover {
+  background-color: var(--bg-subtle);
+  border-color: var(--accent);
+}
+
+.lang-chip-btn.is-active {
+  background-color: var(--ink);
+  color: var(--bg-elevated);
+  border-color: var(--ink);
+}
+
+.all-lang-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.lang-list-item {
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  color: var(--ink-secondary);
+  border: 1px solid transparent;
+  transition: all 0.12s ease;
+}
+
+.lang-list-item:hover {
+  background-color: var(--bg-subtle);
+  color: var(--ink);
+}
+
+.lang-list-item.is-active {
+  background-color: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* "New Words in this Scenario" Banner */
+.new-words-banner {
+  margin-top: 14px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-subtle);
+  border-left: 3px solid var(--accent);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nwb-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+}
+
+.nwb-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.nwb-pill {
+  font-size: 0.8rem;
+  background-color: var(--bg-elevated);
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.nwb-word {
+  font-weight: 600;
+}
+
+.nwb-meaning {
+  color: var(--ink-secondary);
+  margin-left: 4px;
+}
 .lang-hint-trigger {
   border: 1px solid var(--border);
   background-color: var(--bg-elevated);
