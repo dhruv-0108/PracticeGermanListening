@@ -154,7 +154,9 @@ const AVAILABLE_AUDIO_CHAPTERS = [...new Set(CONVERSATIONS.filter(c => !c.isMix)
 // ─── Application State ───
 const initialClip = CONVERSATIONS.find(c => c.id === progress.lastClipId) || CONVERSATIONS[0];
 const state = {
-  mode: "listen",
+  mode: "feed",
+  feedLevel: "A1",
+  feedChapter: initialClip && !initialClip.isMix ? initialClip.chapters[0] : "kap-1",
   activeChapter: initialClip && !initialClip.isMix ? initialClip.chapters[0] : "kap-1",
   activeCategory: "All",
   playlist: [],
@@ -176,9 +178,19 @@ const state = {
 
 // ─── DOM Elements ───
 const audio = document.getElementById("audioPlayer");
+const feedView = document.getElementById("feedView");
 const listenView = document.getElementById("listenView");
 const syllabusView = document.getElementById("syllabusView");
 const mixerView = document.getElementById("mixerView");
+
+const feedChapterBar = document.getElementById("feedChapterBar");
+const feedChapterKicker = document.getElementById("feedChapterKicker");
+const feedChapterTitle = document.getElementById("feedChapterTitle");
+const feedChapterTheme = document.getElementById("feedChapterTheme");
+const feedPlayAllBtn = document.getElementById("feedPlayAllBtn");
+const feedChapterPrepBtn = document.getElementById("feedChapterPrepBtn");
+const feedSectionsContainer = document.getElementById("feedSectionsContainer");
+const backToFeedBtn = document.getElementById("backToFeedBtn");
 
 const currentChapterLabel = document.getElementById("currentChapterLabel");
 const coverageText = document.getElementById("coverageText");
@@ -331,15 +343,189 @@ function setMode(mode) {
     btn.classList.toggle("is-active", btn.dataset.mode === mode);
   });
 
+  feedView.hidden = mode !== "feed";
   listenView.hidden = mode !== "listen";
   syllabusView.hidden = mode !== "syllabus";
   mixerView.hidden = mode !== "mixer";
 
-  if (mode === "syllabus") {
+  if (mode === "feed") {
+    renderFeedView();
+  } else if (mode === "syllabus") {
     renderSyllabusView();
   } else if (mode === "mixer") {
     renderMixerView();
   }
+}
+
+// ─── Render Feed View (Option 3: Streaming Media Dashboard) ───
+function renderFeedView() {
+  const chapters = NETZWERK_CHAPTERS[state.feedLevel] || [];
+  let chMeta = chapters.find(c => c.id === state.feedChapter);
+  if (!chMeta) {
+    chMeta = chapters[0];
+    state.feedChapter = chMeta.id;
+  }
+
+  // Update Level Switcher active state
+  document.querySelectorAll("[data-feed-level]").forEach(btn => {
+    btn.classList.toggle("is-active", btn.dataset.feedLevel === state.feedLevel);
+  });
+
+  // Render Horizontal Chapter Strip
+  feedChapterBar.innerHTML = chapters
+    .map(c => {
+      const active = c.id === chMeta.id ? "is-active" : "";
+      return `<button class="feed-ch-card ${active} notranslate" lang="de" translate="no" type="button" data-fch="${c.id}">
+        Kapitel ${c.number}: ${escapeHtml(c.title)}
+      </button>`;
+    })
+    .join("");
+
+  feedChapterBar.querySelectorAll(".feed-ch-card").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.feedChapter = btn.dataset.fch;
+      renderFeedView();
+    });
+  });
+
+  // Update Chapter Intro Banner
+  feedChapterKicker.textContent = `${state.feedLevel} · Kapitel ${chMeta.number}`;
+  feedChapterTitle.textContent = chMeta.title;
+  feedChapterTheme.textContent = chMeta.theme;
+
+  const currentChClips = CONVERSATIONS.filter(
+    c => !c.isMix && state.feedLevel === "A1" && c.chapters[0] === chMeta.id
+  );
+
+  feedPlayAllBtn.textContent = `▶ Play Chapter (${currentChClips.length} Clips)`;
+  feedPlayAllBtn.onclick = () => {
+    if (currentChClips.length > 0) {
+      rebuildPlaylistForChapter(chMeta.id, "All");
+      loadConversation(currentChClips[0], true);
+      setMode("listen");
+    }
+  };
+
+  feedChapterPrepBtn.onclick = () => {
+    state.syllabusLevel = state.feedLevel;
+    state.syllabusChapter = chMeta.id;
+    state.syllabusSubtab = "vocab";
+    setMode("syllabus");
+  };
+
+  // Group Clips by Topic Category
+  const categoriesMap = new Map();
+  for (const clip of currentChClips) {
+    if (!categoriesMap.has(clip.category)) {
+      categoriesMap.set(clip.category, []);
+    }
+    categoriesMap.get(clip.category).push(clip);
+  }
+
+  // Also include Cross-Chapter Mixes if they involve this chapter
+  const relevantMixes = CONVERSATIONS.filter(
+    c => c.isMix && state.feedLevel === "A1" && c.chapters.includes(chMeta.id)
+  );
+
+  let html = "";
+
+  // Render each Topic Section with its Media Cards
+  for (const [category, clips] of categoriesMap.entries()) {
+    const totalSecs = clips.reduce((acc, c) => acc + Math.round(c.durationMs / 1000), 0);
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    const durationLabel = `${mins}:${String(secs).padStart(2, "0")} mins`;
+
+    const heardCount = clips.filter(c => progress.completedClips[c.id]).length;
+
+    html += `
+      <section class="feed-topic-block">
+        <div class="feed-topic-header">
+          <h2 class="feed-topic-title notranslate" lang="de" translate="no">${escapeHtml(category)}</h2>
+          <span class="feed-topic-meta">${clips.length} Dialogues · ${durationLabel} · <span translate="yes">${heardCount}/${clips.length} completed</span></span>
+        </div>
+        <div class="feed-topic-carousel">
+          ${clips
+            .map((clip, idx) => {
+              const isPlaying = state.currentClip?.id === clip.id;
+              const completed = progress.completedClips[clip.id];
+              return `
+                <article class="media-card ${isPlaying ? "is-active-playing" : ""}" data-clip-id="${escapeHtml(clip.id)}">
+                  <div>
+                    <div class="mc-meta-row">
+                      <span class="notranslate" translate="no">#${String(idx + 1).padStart(2, "0")}</span>
+                      <span class="notranslate" translate="no">${formatTime(clip.durationMs)}</span>
+                    </div>
+                    <h3 class="mc-clip-title notranslate" lang="de" translate="no">${escapeHtml(clip.title)}</h3>
+                    <p class="mc-context" translate="yes">${escapeHtml(clip.context)}</p>
+                  </div>
+                  <div class="mc-bottom-row">
+                    <span class="mc-action-tag">▶ Listen &amp; Read</span>
+                    ${completed ? `<span class="mc-listen-state">✓ Listened</span>` : ""}
+                  </div>
+                </article>
+              `;
+            })
+            .join("")}
+        </div>
+      </section>
+    `;
+  }
+
+  // Add Relevant Cross-Chapter Mixes Section
+  if (relevantMixes.length > 0) {
+    html += `
+      <section class="feed-topic-block">
+        <div class="feed-topic-header">
+          <h2 class="feed-topic-title">Cross-Chapter Combined Mixes</h2>
+          <span class="feed-topic-meta">${relevantMixes.length} Dialogues · Blending Chapter Vocabulary</span>
+        </div>
+        <div class="feed-topic-carousel">
+          ${relevantMixes
+            .map(clip => {
+              const isPlaying = state.currentClip?.id === clip.id;
+              const completed = progress.completedClips[clip.id];
+              return `
+                <article class="media-card ${isPlaying ? "is-active-playing" : ""}" data-clip-id="${escapeHtml(clip.id)}">
+                  <div>
+                    <div class="mc-meta-row">
+                      <span class="notranslate" lang="de" translate="no">${escapeHtml(clip.category)}</span>
+                      <span class="notranslate" translate="no">${formatTime(clip.durationMs)}</span>
+                    </div>
+                    <h3 class="mc-clip-title notranslate" lang="de" translate="no">${escapeHtml(clip.title)}</h3>
+                    <p class="mc-context" translate="yes">${escapeHtml(clip.context)}</p>
+                  </div>
+                  <div class="mc-bottom-row">
+                    <span class="mc-action-tag">▶ Listen Mixed</span>
+                    ${completed ? `<span class="mc-listen-state">✓ Listened</span>` : ""}
+                  </div>
+                </article>
+              `;
+            })
+            .join("")}
+        </div>
+      </section>
+    `;
+  }
+
+  feedSectionsContainer.innerHTML = html;
+
+  // Wire Click Handlers on Media Cards
+  feedSectionsContainer.querySelectorAll(".media-card").forEach(card => {
+    card.addEventListener("click", () => {
+      const clipId = card.dataset.clipId;
+      const target = CONVERSATIONS.find(c => c.id === clipId);
+      if (target) {
+        if (target.isMix) {
+          state.playlist = CONVERSATIONS.filter(c => c.isMix);
+        } else {
+          rebuildPlaylistForChapter(target.chapters[0], "All");
+        }
+        loadConversation(target, true);
+        setMode("listen");
+      }
+    });
+  });
 }
 
 // ─── Render Category Strip & Playlist for Active Chapter ───
@@ -913,7 +1099,9 @@ document.getElementById("openEpisodeListBtn").addEventListener("click", openEpis
 document.getElementById("chapterPickerBtn").addEventListener("click", openEpisodesModal);
 document.getElementById("closeEpisodesDialogBtn").addEventListener("click", () => closeDialogSmoothly(episodesDialog));
 
-document.getElementById("brandBtn").addEventListener("click", () => setMode("listen"));
+backToFeedBtn?.addEventListener("click", () => setMode("feed"));
+
+document.getElementById("brandBtn").addEventListener("click", () => setMode("feed"));
 document.getElementById("coverageBtn").addEventListener("click", () => {
   state.syllabusLevel = "A1";
   state.syllabusChapter = state.activeChapter || "kap-1";
@@ -1247,3 +1435,4 @@ if (state.currentClip?.isMix) {
   rebuildPlaylistForChapter(state.activeChapter, "All");
 }
 loadConversation(state.currentClip, false);
+renderFeedView();

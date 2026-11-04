@@ -37,7 +37,8 @@
         </div>
 
         <nav class="mode-nav" aria-label="Primary sections">
-          <button class="mode-tab is-active" data-mode="listen" type="button">Listen</button>
+          <button class="mode-tab is-active" data-mode="feed" type="button">Discover</button>
+          <button class="mode-tab" data-mode="listen" type="button">Player</button>
           <button class="mode-tab" data-mode="syllabus" type="button">Chapter Prep</button>
           <button class="mode-tab" data-mode="mixer" type="button">Combine</button>
         </nav>
@@ -62,8 +63,58 @@
         </div>
       </header>
 
+      <!-- MAIN VIEW 0: Discover / Streaming Content Feed (Option 3) -->
+      <section id="feedView" class="view-container is-active">
+        <div class="feed-page">
+          <!-- Level & Chapter Picker Header -->
+          <div class="feed-hero">
+            <div class="feed-level-row">
+              <span class="feed-level-label">Level:</span>
+              <div class="feed-level-pills">
+                <button class="level-pill is-active notranslate" lang="de" translate="no" data-feed-level="A1" type="button">
+                  A1 · Beginner
+                </button>
+                <button class="level-pill notranslate" lang="de" translate="no" data-feed-level="A2" type="button">
+                  A2 · Elementary
+                </button>
+                <button class="level-pill is-soon" type="button" disabled title="Coming Soon">
+                  B1 · Intermediate (Soon)
+                </button>
+              </div>
+            </div>
+
+            <!-- Chapter Switcher Strip -->
+            <div class="feed-chapter-strip-wrap">
+              <div id="feedChapterBar" class="feed-chapter-bar" role="tablist" aria-label="Chapters"></div>
+            </div>
+
+            <!-- Chapter Intro Banner -->
+            <div class="feed-chapter-banner">
+              <div class="fcb-text">
+                <p id="feedChapterKicker" class="syllabus-kicker notranslate" lang="de" translate="no">Kapitel 1</p>
+                <h1 id="feedChapterTitle" class="feed-heading notranslate" lang="de" translate="no">Guten Tag!</h1>
+                <p id="feedChapterTheme" class="feed-subhead notranslate" lang="de" translate="no">
+                  Begrüßung, andere vorstellen, Herkunft und Sprachen
+                </p>
+              </div>
+              <div class="fcb-actions">
+                <button id="feedPlayAllBtn" class="primary-action-btn" type="button">
+                  ▶ Play Chapter (25 Clips)
+                </button>
+                <button id="feedChapterPrepBtn" class="ghost-control feed-prep-btn" type="button">
+                  View Syllabus &amp; Vocab →
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Dynamic Topic Sections (Spotify Carousels/Rows) -->
+          <div id="feedSectionsContainer" class="feed-sections"></div>
+        </div>
+      </section>
+
       <!-- MAIN VIEW 1: Minimal Listening Player -->
-      <main id="listenView" class="view-container is-active">
+      <main id="listenView" class="view-container" hidden>
         <div class="listen-stage">
           <!-- Topic filter strip + episode selector -->
           <div class="stage-meta-bar">
@@ -72,6 +123,11 @@
 
           <!-- Episode Header -->
           <div class="episode-header">
+            <div class="episode-top-nav">
+              <button id="backToFeedBtn" class="back-to-feed-btn" type="button">
+                ← Back to Discover Feed
+              </button>
+            </div>
             <div class="episode-kicker-row">
               <span id="episodeCounter" class="episode-counter notranslate" translate="no">01 / 25</span>
               <span class="dot-sep" aria-hidden="true">·</span>
